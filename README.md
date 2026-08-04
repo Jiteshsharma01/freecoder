@@ -63,9 +63,18 @@ You can author your README using Visual Studio Code. Here are some useful editor
 * Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
 * Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
 
+## Features to add
+
+1. Add a stop button to stop generating further in current chat as now if i type message while generating it start responding in new chat box of other question forgetting what i asked.
+2. Adding a "Copy Code Block" button to the streaming UI text elements.
+3. Displaying a warning notification banner if a user tries to chat before running the map configuration generator step first.
+4. add an automatic scroll-to-bottom anchor lock so your panel follows long code streams gracefully, but if user try to scroll to top then allow that, show down arrow to reach the bottom instantly.
+   5.set up a clear chat history button mechanism?
+5. I switch to separate extension, chat is getting cleared?
+
 ## For more information
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
+* [Visual Studio Code&#39;s Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
 * [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
 
 **Enjoy!**
