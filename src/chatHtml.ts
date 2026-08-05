@@ -37,6 +37,13 @@ export function getChatHtml(webviewUri: string): string {
             #scroll-anchor.visible { opacity: 0.9; pointer-events: auto; transform: translateY(0); }
             #scroll-anchor:hover { background: var(--vscode-button-hoverBackground); opacity: 1; }
 
+            /* Animated Loading Spinner Element */
+            .api-loading-dots { display: inline-flex; align-items: center; gap: 4px; padding: 8px 12px; background: var(--vscode-textCodeBlock-background); border-radius: 4px; margin-top: 5px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+            .loading-dot { width: 6px; height: 6px; background-color: var(--vscode-descriptionForeground); border-radius: 50%; animation: bounceDot 1.4s infinite ease-in-out both; }
+            .loading-dot:nth-child(1) { animation-delay: -0.32s; }
+            .loading-dot:nth-child(2) { animation-delay: -0.16s; }
+            @keyframes bounceDot { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
+
             * { scrollbar-width: thin; scrollbar-color: var(--vscode-scrollbarSlider-background) transparent; }
             /* 2. Webkit-specific customization to perfectly style scrollbars across platforms */
             #chat-log::-webkit-scrollbar, .code-container-scroll::-webkit-scrollbar, textarea::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -92,6 +99,7 @@ export function getChatHtml(webviewUri: string): string {
             let currentStreamDiv = null;
             let currentResponseText = "";
             const DEFAULT_HEIGHT = '50px';
+            let apiLoadingIndicator = null;
 
             // Track scrolling state explicitly
             let isUserScrolledUp = false; 
@@ -206,6 +214,11 @@ export function getChatHtml(webviewUri: string): string {
             function resetUIState() {
                 document.getElementById('send-btn').style.display = 'block';
                 document.getElementById('stop-btn').style.display = 'none';
+                document.getElementById('user-input').disabled = false;
+                document.getElementById('provider').disabled = false;
+                // Clean up any loose embedded loader nodes
+                const activeLoader = document.getElementById('ai-embedded-loader');
+                if (activeLoader) activeLoader.remove();
             }
 
             const textarea = document.getElementById('user-input');
@@ -226,6 +239,12 @@ export function getChatHtml(webviewUri: string): string {
                 const text = userInputEl.value.trim();
                 const provider = document.getElementById('provider').value;
                 if (!text && !base64Attachment) return;
+
+                // Lock out alternative input configurations while streaming is active
+                document.getElementById('send-btn').style.display = 'none';
+                document.getElementById('stop-btn').style.display = 'block';
+                userInputEl.disabled = true;
+                document.getElementById('provider').disabled = true;
 
                 const safeEscape = (str) => {
                     return str
@@ -279,20 +298,33 @@ export function getChatHtml(webviewUri: string): string {
                         currentResponseText = ""; // Clear buffer for new chunk cycles
                         currentStreamDiv = document.createElement('div');
                         currentStreamDiv.className = 'msg ai-msg';
-                        currentStreamDiv.innerHTML = '<b>AI (' + message.provider + '):</b> <div class="stream-content"></div>';
+                        currentStreamDiv.innerHTML = '<b>AI (' + message.provider + '):</b>' +
+                            '<div id="ai-embedded-loader" class="api-loading-dots" style="display: inline-flex; margin-left: 8px; margin-top: 0; padding: 2px 6px; font-size: 11px;">' +
+                                '<span>thinking</span>' +
+                                '<div class="loading-dot" style="width: 4px; height: 4px;"></div>' +
+                                '<div class="loading-dot" style="width: 4px; height: 4px;"></div>' +
+                                '<div class="loading-dot" style="width: 4px; height: 4px;"></div>' +
+                            '</div>' +
+                            '<div class="stream-content"></div>';
+                        
                         chatLog.appendChild(currentStreamDiv);
                         scrollToBottom();
                         break;
 
                     case 'appendStream':
                         if (currentStreamDiv) {
+                            // DESTROY EMBEDDED DOTS: The exact millisecond the first true token character arrives, remove the loader
+                            const embeddedLoader = currentStreamDiv.querySelector('#ai-embedded-loader');
+                            if (embeddedLoader) {
+                                embeddedLoader.remove();
+                            }
                             currentResponseText += message.text;
                             const contentSpan = currentStreamDiv.querySelector('.stream-content');
                             // Re-evaluate markdown and parse into a 70px scroll container
                             contentSpan.innerHTML = formatMarkdownStream(currentResponseText);
-                            attachAllCopyListeners(); // Bind clipboard click event hooks dynamically
+                            attachAllCopyListeners();
 
-                            // SMART FOLLOW LOOP: Only slide downward if the developer isn't reviewing earlier code sections
+                            // Smart scroll focus follow check
                             if (!isUserScrolledUp) { chatLog.scrollTop = chatLog.scrollHeight; }
                         }
                         break;
