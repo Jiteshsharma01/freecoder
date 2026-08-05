@@ -1,80 +1,48 @@
-# itui README
+# 🚀 Free AI Copilot for VS Code
 
-This is the README for your extension "itui". After writing up a brief description, we recommend including the following sections.
+A lightweight, private, and customizable AI code assistant sidebar. This tool connects directly to free external AI tools or your locally running models, giving you full control over your development environment.
 
-## Features
+## ✨ Core Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+* **🦙 Local AI Support:** Connects directly to local engines like Ollama running heavy models (`qwen3-coder:30b`).
+* **🗺️ Project Structure Mapping:** Generates a `project_blueprint.md` map file at your project root to feed into your AI model context.
+* **⏳ Real-time Token Streaming:** Watch your answers generate instantly token-by-token instead of waiting for long code generation cycles.
+* **🛑 Execution Interruption:** Stop generations immediately with a built-in "Stop" cancel button if you want to rewrite your question.
+* **📁 Smart Code Viewports:** Code snippets are isolated into independent windows locked to a compact ~70px height limit with thin custom scrollbars.
+* **📎 Clipboard Copy Actions:** Quick click "Copy" triggers are automatically attached to every generated code block window.
+* **🔒 Multi-Tab State Persistence:** Your text, active chat history, and sidebar position are preserved when switching extension views.
 
-For example if there is an image subfolder under your extension project workspace:
+## 🛠️ Requirements & Setup
 
-\!\[feature X\]\(images/feature-x.png\)
+Before running this extension, make sure you configure your background AI engine:
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+### 1. Local Ollama Integration (Default)
 
-## Requirements
+1. Download and install [Ollama](https://ollama.com).
+2. Open your terminal and pull down your target model weights:
+   ```bash
+   ollama pull qwen3-coder:30b
+   ```
+3. Keep the Ollama app background server running while typing queries.
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+### 2. Multi-Modal Assets (Gemini / Free API)
 
-## Extension Settings
+* Switch your model provider dropdown to **Gemini Flash** or alternate online services if you need to upload visual file images for processing.
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+## 🚀 How To Use
 
-For example:
+1. Click on the **Speech Bubble Icon** in your VS Code left sidebar panel.
+2. Select your active backend model inside the **AI Provider Tool** dropdown list.
+3. Click the **🗺️ Generate Project Structure Map** button first. This creates a blueprint tree file of your directory so the AI has full situational awareness of your project context.
+4. Type your prompt instructions or code questions inside the textarea box and hit **Send Message**.
+5. Click **Stop** at any time to freeze active code creation streams.
+6. Click **🗑️ Clear** to instantly sweep away your message logs and restart a fresh conversation session.
 
-This extension contributes the following settings:
+## 📦 How to Install From File (.VSIX)
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+If this extension was shared with you privately as a standalone bundle file:
 
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## Features to add
-
-1. Add a stop button to stop generating further in current chat as now if i type message while generating it start responding in new chat box of other question forgetting what i asked.
-2. Adding a "Copy Code Block" button to the streaming UI text elements.
-3. Displaying a warning notification banner if a user tries to chat before running the map configuration generator step first.
-4. add an automatic scroll-to-bottom anchor lock so your panel follows long code streams gracefully, but if user try to scroll to top then allow that, show down arrow to reach the bottom instantly.
-   5.set up a clear chat history button mechanism?
-5. I switch to separate extension, chat is getting cleared?
-
-## For more information
-
-* [Visual Studio Code&#39;s Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+1. Open VS Code and navigate to the **Extensions tab** (`Ctrl+Shift+X` or `Cmd+Shift+X`).
+2. Click the **three dots (...)** button positioned in the top right corner of the Extensions menu panel view.
+3. Choose **Install from VSIX...** from the dropdown options.
+4. Select the `freecopilot-0.0.1.vsix` file from your local disk and click open to activate it instantly.
