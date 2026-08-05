@@ -3,6 +3,7 @@
   "displayName": "FreeCopilot",
   "description": "A free AI assistant with project mapping and asset uploading.",
   "version": "0.0.1",
+  "publisher": "local-itui", 
   "engines": {
     "vscode": "^1.125.0"
   },
