@@ -8,18 +8,26 @@ export function getChatHtml(webviewUri: string): string {
         <style>
             body { font-family: sans-serif; padding: 10px; display: flex; flex-direction: column; height: 100vh; color: var(--vscode-editor-foreground); background-color: var(--vscode-sideBar-background); box-sizing: border-box; margin: 0; position: relative; }
             select, button, textarea { width: 100%; margin-bottom: 8px; padding: 8px; border-radius: 4px; border: 1px solid var(--vscode-dropdown-border); background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); box-sizing: border-box; }
-            button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; cursor: pointer; font-weight: bold; }
+            button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; cursor: pointer; width: fit-content; }
             button:hover { background: var(--vscode-button-hoverBackground); }
+            #selection-box { display: flex; gap: 10px; }
+            // #select-ai { display: flex; gap: 10px; }
+            .btn-with-icon { display: flex; align-items: center; justify-content: center; gap: 8px; }
             /* Container positioning relative for arrow layout overlays */
             #chat-container { flex-grow: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; margin-bottom: 8px; }
             #chat-log { flex-grow: 1; overflow-y: auto; border: 1px solid var(--vscode-panel-border); padding: 8px; border-radius: 4px; background: var(--vscode-editor-background); font-size: 13px; }
             .msg { margin-bottom: 10px; padding: 6px; border-radius: 4px; }
-            .user-msg { background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-textBlockQuote-border); }
+            .user-msg { background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-textBlockQuote-border); max-height: 200px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; }
             .ai-msg { background: var(--vscode-textCodeBlock-background); }
-            textarea { resize: none; height: 60px; }
+            textarea { resize: none; min-height: 120px; max-height: 80px; overflow-y: auto; box-sizing: border-box; }
             .row { display: flex; gap: 5px; }
             #file-preview { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 5px; }
             .stream-content { white-space: pre-wrap; font-family: monospace; }
+            .code-block-wrapper { position: relative; background: #1e1e1e; border-radius: 4px; margin: 8px 0; padding: 28px 8px 8px 8px; }
+            .code-container-scroll { max-height: 70px; overflow-y: auto; overflow-x: auto; }
+            .copy-btn { position: absolute; top: 4px; right: 4px; width: auto; padding: 2px 6px; font-size: 10px; background: rgba(255,255,255,0.1); color: #fff; z-index: 5; }
+            .copy-btn:hover { background: rgba(255,255,255,0.2); }
+            pre { margin: 0; font-family: monospace; color: #d4d4d4; font-size: 12px; }
             /* Styled stop button */
             #stop-btn { background: var(--vscode-statusBarItem-errorBackground, #c74242); color: white; display: none; margin-top: 4px; }
             #stop-btn:hover { background: #b03535; }
@@ -30,16 +38,19 @@ export function getChatHtml(webviewUri: string): string {
         </style>
     </head>
     <body>
-        <!-- 1. Model Selection -->
-        <label for="provider">AI Provider Tool:</label>
-        <select id="provider">
-            <option value="ollama-qwen3-local">Local Ollama (Qwen3-Coder:30b)</option>
-            <option value="gemini">Gemini Flash (Free Tier)</option>
-            <option value="huggingface">Hugging Face API</option>
-        </select>
-
-        <!-- 2. Project Map Trigger Button -->
-        <button id="map-btn">🗺️ Generate Project Structure Map</button>
+        <div id="selection-box">
+            <!-- 1. Model Selection -->
+            <div id="select-ai">
+                <label for="provider">AI Provider Tool:</label>
+                <select id="provider">
+                    <option value="ollama-qwen3-local">Local Ollama (Qwen3-Coder:30b)</option>
+                    <option value="gemini">Gemini Flash (Free Tier)</option>
+                    <option value="huggingface">Hugging Face API</option>
+                </select>
+            </div>
+            <!-- 2. Project Map Trigger Button -->
+            <button id="map-btn">Generate 🛠️🗺️</button>
+        </div>
 
         <!-- Wrapped log panel inside structural relative frame block -->
         <div id="chat-container">
@@ -142,34 +153,6 @@ export function getChatHtml(webviewUri: string): string {
                 document.getElementById('send-btn').style.display = 'block';
                 document.getElementById('stop-btn').style.display = 'none';
             }
-
-            // // Send Prompt Pipeline
-            // document.getElementById('send-btn').addEventListener('click', () => {
-            //     const text = document.getElementById('user-input').value.trim();
-            //     const provider = document.getElementById('provider').value;
-            //     if (!text && !base64Attachment) return;
-
-            //     const chatLog = document.getElementById('chat-log');
-            //     chatLog.innerHTML += '<div class="msg user-msg"><b>You:</b> ' + text + (attachmentName ? '<br><small>📎 ' + attachmentName + '</small>' : '') + '</div>';
-
-            //     console.log({text, chatLog, ht: chatLog.innerHTML, tex: chatLog.innerText});
-            //     // Force layout lock down after you send a fresh instruction
-            //     scrollToBottom();
-
-            //     vscode.postMessage({
-            //         command: 'sendMessage',
-            //         text: text,
-            //         provider: provider,
-            //         attachment: base64Attachment,
-            //         attachmentType: document.getElementById('file-input').files[0]?.type || null
-            //     });
-
-            //     document.getElementById('user-input').value = '';
-            //     document.getElementById('file-input').value = '';
-            //     document.getElementById('file-preview').innerText = 'No file attached';
-            //     base64Attachment = null;
-            //     attachmentName = null;
-            // });
 
             // Send Prompt Pipeline
             document.getElementById('send-btn').addEventListener('click', () => {
