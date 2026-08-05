@@ -20,7 +20,6 @@ export function getChatHtml(webviewUri: string): string {
             .row { display: flex; gap: 5px; }
             #file-preview { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 5px; }
             .stream-content { white-space: pre-wrap; font-family: monospace; }
-            
             /* Styled stop button */
             #stop-btn { background: var(--vscode-statusBarItem-errorBackground, #c74242); color: white; display: none; margin-top: 4px; }
             #stop-btn:hover { background: #b03535; }
@@ -31,7 +30,6 @@ export function getChatHtml(webviewUri: string): string {
         </style>
     </head>
     <body>
-
         <!-- 1. Model Selection -->
         <label for="provider">AI Provider Tool:</label>
         <select id="provider">
@@ -70,7 +68,7 @@ export function getChatHtml(webviewUri: string): string {
             let attachmentName = null;
             let currentStreamDiv = null;
 
-             // Track scrolling state explicitly
+            // Track scrolling state explicitly
             let isUserScrolledUp = false; 
             const chatLog = document.getElementById('chat-log');
             const scrollAnchor = document.getElementById('scroll-anchor');
@@ -117,12 +115,12 @@ export function getChatHtml(webviewUri: string): string {
 
                 attachmentName = file.name;
                 const reader = new FileReader();
-                
+
                 reader.onload = function(evt) {
                     base64Attachment = evt.target.result; 
                     document.getElementById('file-preview').innerText = '📎 Attached: ' + file.name;
                 };
-                
+
                 if (file.type.startsWith('image/')) {
                     reader.readAsDataURL(file); 
                 } else {
@@ -134,7 +132,6 @@ export function getChatHtml(webviewUri: string): string {
             document.getElementById('stop-btn').addEventListener('click', () => {
                 vscode.postMessage({ command: 'stopGeneration' });
                 resetUIState();
-                
                 if (currentStreamDiv) {
                     const contentSpan = currentStreamDiv.querySelector('.stream-content');
                     contentSpan.innerHTML += ' <i style="color: var(--vscode-descriptionForeground);">(Generation stopped)</i>';
@@ -154,7 +151,6 @@ export function getChatHtml(webviewUri: string): string {
 
                 const chatLog = document.getElementById('chat-log');
                 chatLog.innerHTML += '<div class="msg user-msg"><b>You:</b> ' + text + (attachmentName ? '<br><small>📎 ' + attachmentName + '</small>' : '') + '</div>';
-                // chatLog.scrollTop = chatLog.scrollHeight;
                 // Force layout lock down after you send a fresh instruction
                 scrollToBottom();
 
@@ -176,19 +172,16 @@ export function getChatHtml(webviewUri: string): string {
             // Stream Receiver Event Listener Loop
             window.addEventListener('message', event => {
                 const message = event.data;
-                // const chatLog = document.getElementById('chat-log');
 
                 switch (message.command) {
                     case 'startStream':
                         // Show Stop Button, Hide Send Button
                         document.getElementById('send-btn').style.display = 'none';
                         document.getElementById('stop-btn').style.display = 'block';
-
                         currentStreamDiv = document.createElement('div');
                         currentStreamDiv.className = 'msg ai-msg';
                         currentStreamDiv.innerHTML = '<b>AI (' + message.provider + '):</b> <span class="stream-content"></span>';
                         chatLog.appendChild(currentStreamDiv);
-                        // chatLog.scrollTop = chatLog.scrollHeight;
                         scrollToBottom();
                         break;
 
@@ -196,11 +189,8 @@ export function getChatHtml(webviewUri: string): string {
                         if (currentStreamDiv) {
                             const contentSpan = currentStreamDiv.querySelector('.stream-content');
                             contentSpan.textContent += message.text;
-                            // chatLog.scrollTop = chatLog.scrollHeight;
                             // SMART FOLLOW LOOP: Only slide downward if the developer isn't reviewing earlier code sections
-                            if (!isUserScrolledUp) {
-                                chatLog.scrollTop = chatLog.scrollHeight;
-                            }
+                            if (!isUserScrolledUp) { chatLog.scrollTop = chatLog.scrollHeight; }
                         }
                         break;
 
@@ -211,16 +201,12 @@ export function getChatHtml(webviewUri: string): string {
 
                     case 'showError':
                         resetUIState();
-                        // chatLog.innerHTML += '<div class="msg ai-msg" style="color: var(--vscode-errorForeground);">❌ ' + message.text + '</div>';
-                        // chatLog.scrollTop = chatLog.scrollHeight;
                         chatLog.innerHTML += '❌ ' + message.text + '';
                         if (!isUserScrolledUp) scrollToBottom();
                         break;
                         
                     case 'receiveResponse':
                         resetUIState();
-                        // chatLog.innerHTML += '<div class="msg ai-msg"><b>AI:</b> ' + message.text + '</div>';
-                        // chatLog.scrollTop = chatLog.scrollHeight;
                         chatLog.innerHTML += 'AI: ' + message.text + '';
                         if (!isUserScrolledUp) scrollToBottom();
                         break;

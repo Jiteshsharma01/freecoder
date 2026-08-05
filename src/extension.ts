@@ -105,41 +105,59 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // Fetch mapping layout data context string
-        const workspaceTreeContext = await this.getActiveProjectContext();
-        
-        // Glue context details to user prompt
-        const finalPromptWithContext = text + workspaceTreeContext;
+        // 1. SMART CHECK: Look for project context triggers in the user's prompt text
+        const lowerText = text.toLowerCase();
+        const needsContext = 
+            lowerText.includes("project") || 
+            lowerText.includes("my code") || 
+            lowerText.includes("this file") || 
+            lowerText.includes("workspace") || 
+            lowerText.includes("structure") || 
+            lowerText.includes("repository") ||
+            lowerText.includes("app") ||
+            lowerText.includes("blueprint");
+
+        let finalPromptWithContext = text;
+
+        // 2. Only fetch and append the project tree if context is actually requested
+        if (needsContext) {
+            const workspaceTreeContext = await this.getActiveProjectContext();
+            finalPromptWithContext = text + workspaceTreeContext;
+        }
 
         // Fire initialization container command to HTML frontend UI
         webviewView.webview.postMessage({ command: 'startStream', provider: 'Qwen3-Coder' });
 
-        // 4. INSTANTIATE CONTROLLER: Hook a new token manager for this request lifecycle
         this._activeAbortController = new AbortController();
 
         try {
             if (provider === 'ollama-qwen3-local') {
                 const OLLAMA_URL = "http://localhost:11434/api/chat";
+                
+                // 3. Update the System Prompt to guide the model on how to behave with or without context
+                const systemMessage = needsContext 
+                    ? "You are an expert workspace AI assistant. You have full awareness of the developer's project directory tree structure provided in their prompt context to answer specific architectural questions."
+                    : "You are an expert programming tutor and developer assistant. Answer general concepts, write clean code examples, and assist with general requests directly without assuming it relates to a specific local project.";
+
                 const payload = {
                     model: "qwen3-coder:30b",
                     messages: [
                         {
                             role: "system",
-                            content: "You are an expert workspace AI code assistant inside VS Code. You have full awareness of the developer's project directory tree structure provided in their prompt contexts."
+                            content: systemMessage
                         },
                         {
                             role: "user",
                             content: finalPromptWithContext
                         }
                     ],
-                    stream: true // Keep streaming processing enabled
+                    stream: true
                 };
 
                 const response = await fetch(OLLAMA_URL, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload),
-                    // 5. ATTACH SIGNAL: Binds the cancel listener straight into this fetch connection
                     signal: this._activeAbortController.signal 
                 });
 
@@ -147,7 +165,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
                     throw new Error(`Server returned HTTP ${response.status}`); 
                 }
 
-                // Setup Stream Reader Pipeline against network socket response body
                 const reader = response.body?.getReader();
                 const decoder = new TextDecoder();
 
@@ -161,11 +178,8 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
                     const { done, value } = await reader.read();
                     if (done) { break; }
 
-                    // Decode buffer segments
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split("\n");
-
-                    // Keep incomplete trailing lines in buffer
                     buffer = lines.pop() || "";
 
                     for (const line of lines) {
@@ -176,23 +190,18 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
                             const tokenText = parsedChunk.message?.content || "";
                             
                             if (tokenText) {
-                                // Instantly post token fragments back up to UI panel log
                                 webviewView.webview.postMessage({
                                     command: 'appendStream',
                                     text: tokenText
                                 });
                             }
-                        } catch (e) {
-                            // Fail silently for unaligned chunk pieces
-                        }
+                        } catch (e) {}
                     }
                 }
                 
-                // Let frontend know streaming ended cleanly
                 webviewView.webview.postMessage({ command: 'endStream' });
 
             } else {
-                // Fallback mockup responses for secondary options
                 webviewView.webview.postMessage({ 
                     command: 'appendStream', 
                     text: `🤖 Simulating legacy fallback processing for alternative engine option type: ${provider}` 
@@ -201,18 +210,15 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             }
 
         } catch (error: any) {
-            // 6. CATCH ABORT: Do not show an error modal to the user if they triggered the cancel deliberately
             if (error.name === 'AbortError') {
                 console.log('Ollama stream generation aborted by the user.');
             } else {
-                // Forward genuine connection errors cleanly down into frontend view log window
                 webviewView.webview.postMessage({ 
                     command: 'showError', 
                     text: `Ollama Connection Error: Failed to talk to local engine. Details: ${error.message}` 
                 });
             }
         } finally {
-            // Clear the tracking state for the next message run
             this._activeAbortController = null;
         }
     }
