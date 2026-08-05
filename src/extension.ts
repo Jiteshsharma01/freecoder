@@ -17,11 +17,23 @@ export function activate(context: vscode.ExtensionContext) {
     // Register Webview View Sidebar Provider Container interface
     const chatProvider = new FreeCopilotViewProvider(context.extensionUri);
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider('freeCopilot.chatView', chatProvider)
+        vscode.window.registerWebviewViewProvider(
+            'freeCopilot.chatView', 
+            chatProvider,
+            // 🔥 THE FIX: Pass the property here during registration so it binds to the sidebar lifecycle
+            {
+                webviewOptions: {
+                    retainContextWhenHidden: true
+                }
+            }
+        )
     );
 }
 
 class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
+    // 1. Maintain a reference to the active AbortController to stop network streams
+    private _activeAbortController: AbortController | null = null;
+
     constructor(private readonly _extensionUri: vscode.Uri) {}
 
     public resolveWebviewView(
@@ -29,7 +41,12 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken
     ) {
-        webviewView.webview.options = { enableScripts: true };
+        // Keep it clean. Only assign basic options to the underlying webview document
+        webviewView.webview.options = { 
+            enableScripts: true 
+        };
+        
+        webviewView.description = "Local Code Assistant";
         webviewView.webview.html = getChatHtml('');
 
         // Intercept incoming interface pipeline events 
@@ -41,11 +58,17 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
                 case 'sendMessage':
                     await this.handleChatMessage(data, webviewView);
                     break;
+                case 'stopGeneration':
+                    if (this._activeAbortController) {
+                        this._activeAbortController.abort();
+                        this._activeAbortController = null;
+                    }
+                    break;
             }
         });
     }
 
-    // FIXED: Reads explicitly from index 0 of the workspace array to eliminate compile errors
+    // Reads explicitly from index 0 of the workspace array to eliminate compile errors
     private async getActiveProjectContext(): Promise<string> {
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) { 
@@ -67,11 +90,11 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    // UPDATED: Fully converted to real-time NDJSON chunk stream handling
+    // Fully converted to real-time NDJSON chunk stream handling with Abort Signal integration
     private async handleChatMessage(data: any, webviewView: vscode.WebviewView) {
         const { text, provider, attachment, attachmentType } = data;
 
-        // 1. Block multi-modal payloads from dropping into local textual models
+        // Block multi-modal payloads from dropping into local textual models
         if (attachment && attachmentType?.startsWith('image/')) {
             if (provider === 'ollama-qwen3-local') {
                 webviewView.webview.postMessage({ 
@@ -82,14 +105,17 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // 2. Fetch mapping layout data context string
+        // Fetch mapping layout data context string
         const workspaceTreeContext = await this.getActiveProjectContext();
         
-        // 3. Glue context details to user prompt
+        // Glue context details to user prompt
         const finalPromptWithContext = text + workspaceTreeContext;
 
-        // 4. Fire initialization container command to HTML frontend UI
+        // Fire initialization container command to HTML frontend UI
         webviewView.webview.postMessage({ command: 'startStream', provider: 'Qwen3-Coder' });
+
+        // 4. INSTANTIATE CONTROLLER: Hook a new token manager for this request lifecycle
+        this._activeAbortController = new AbortController();
 
         try {
             if (provider === 'ollama-qwen3-local') {
@@ -112,14 +138,16 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
                 const response = await fetch(OLLAMA_URL, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(payload),
+                    // 5. ATTACH SIGNAL: Binds the cancel listener straight into this fetch connection
+                    signal: this._activeAbortController.signal 
                 });
 
                 if (!response.ok) { 
                     throw new Error(`Server returned HTTP ${response.status}`); 
                 }
 
-                // 5. Setup Stream Reader Pipeline against network socket response body
+                // Setup Stream Reader Pipeline against network socket response body
                 const reader = response.body?.getReader();
                 const decoder = new TextDecoder();
 
@@ -148,7 +176,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
                             const tokenText = parsedChunk.message?.content || "";
                             
                             if (tokenText) {
-                                // 6. Instantly post token fragments back up to UI panel log
+                                // Instantly post token fragments back up to UI panel log
                                 webviewView.webview.postMessage({
                                     command: 'appendStream',
                                     text: tokenText
@@ -159,20 +187,33 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
                         }
                     }
                 }
+                
+                // Let frontend know streaming ended cleanly
+                webviewView.webview.postMessage({ command: 'endStream' });
+
             } else {
                 // Fallback mockup responses for secondary options
                 webviewView.webview.postMessage({ 
                     command: 'appendStream', 
                     text: `🤖 Simulating legacy fallback processing for alternative engine option type: ${provider}` 
                 });
+                webviewView.webview.postMessage({ command: 'endStream' });
             }
 
         } catch (error: any) {
-            // Forward connection errors cleanly down into frontend view log window
-            webviewView.webview.postMessage({ 
-                command: 'showError', 
-                text: `Ollama Connection Error: Failed to talk to local engine. Details: ${error.message}` 
-            });
+            // 6. CATCH ABORT: Do not show an error modal to the user if they triggered the cancel deliberately
+            if (error.name === 'AbortError') {
+                console.log('Ollama stream generation aborted by the user.');
+            } else {
+                // Forward genuine connection errors cleanly down into frontend view log window
+                webviewView.webview.postMessage({ 
+                    command: 'showError', 
+                    text: `Ollama Connection Error: Failed to talk to local engine. Details: ${error.message}` 
+                });
+            }
+        } finally {
+            // Clear the tracking state for the next message run
+            this._activeAbortController = null;
         }
     }
 }

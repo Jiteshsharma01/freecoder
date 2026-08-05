@@ -18,6 +18,10 @@ export function getChatHtml(webviewUri: string): string {
             .row { display: flex; gap: 5px; }
             #file-preview { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 5px; }
             .stream-content { white-space: pre-wrap; font-family: monospace; }
+            
+            /* Styled stop button */
+            #stop-btn { background: var(--vscode-statusBarItem-errorBackground, #c74242); color: white; display: none; margin-top: 4px; }
+            #stop-btn:hover { background: #b03535; }
         </style>
     </head>
     <body>
@@ -46,6 +50,9 @@ export function getChatHtml(webviewUri: string): string {
             <textarea id="user-input" placeholder="Ask a question or request code..."></textarea>
         </div>
         <button id="send-btn">Send Message</button>
+        
+        <!-- NEW STOP BUTTON -->
+        <button id="stop-btn">⏹️ Stop Generating</button>
 
         <script>
             const vscode = acquireVsCodeApi();
@@ -71,16 +78,32 @@ export function getChatHtml(webviewUri: string): string {
                 const reader = new FileReader();
                 
                 reader.onload = function(evt) {
-                    base64Attachment = evt.target.result; // Full data URL
+                    base64Attachment = evt.target.result; 
                     document.getElementById('file-preview').innerText = '📎 Attached: ' + file.name;
                 };
                 
                 if (file.type.startsWith('image/')) {
-                    reader.readAsDataURL(file); // Images need full base64 encoding strings
+                    reader.readAsDataURL(file); 
                 } else {
-                    reader.readAsText(file); // Text structures can load raw
+                    reader.readAsText(file); 
                 }
             });
+
+            // Handle Stop Button Click
+            document.getElementById('stop-btn').addEventListener('click', () => {
+                vscode.postMessage({ command: 'stopGeneration' });
+                resetUIState();
+                
+                if (currentStreamDiv) {
+                    const contentSpan = currentStreamDiv.querySelector('.stream-content');
+                    contentSpan.innerHTML += ' <i style="color: var(--vscode-descriptionForeground);">(Generation stopped)</i>';
+                }
+            });
+
+            function resetUIState() {
+                document.getElementById('send-btn').style.display = 'block';
+                document.getElementById('stop-btn').style.display = 'none';
+            }
 
             // Send Prompt Pipeline
             document.getElementById('send-btn').addEventListener('click', () => {
@@ -88,12 +111,10 @@ export function getChatHtml(webviewUri: string): string {
                 const provider = document.getElementById('provider').value;
                 if (!text && !base64Attachment) return;
 
-                // Append local layout query natively into HTML view
                 const chatLog = document.getElementById('chat-log');
                 chatLog.innerHTML += '<div class="msg user-msg"><b>You:</b> ' + text + (attachmentName ? '<br><small>📎 ' + attachmentName + '</small>' : '') + '</div>';
                 chatLog.scrollTop = chatLog.scrollHeight;
 
-                // Forward data over the frame layer boundary to Extension Host
                 vscode.postMessage({
                     command: 'sendMessage',
                     text: text,
@@ -102,7 +123,6 @@ export function getChatHtml(webviewUri: string): string {
                     attachmentType: document.getElementById('file-input').files[0]?.type || null
                 });
 
-                // Clear controls safely
                 document.getElementById('user-input').value = '';
                 document.getElementById('file-input').value = '';
                 document.getElementById('file-preview').innerText = 'No file attached';
@@ -117,7 +137,10 @@ export function getChatHtml(webviewUri: string): string {
 
                 switch (message.command) {
                     case 'startStream':
-                        // Instantiate a temporary token block container inside sidebar DOM tree
+                        // Show Stop Button, Hide Send Button
+                        document.getElementById('send-btn').style.display = 'none';
+                        document.getElementById('stop-btn').style.display = 'block';
+
                         currentStreamDiv = document.createElement('div');
                         currentStreamDiv.className = 'msg ai-msg';
                         currentStreamDiv.innerHTML = '<b>AI (' + message.provider + '):</b> <span class="stream-content"></span>';
@@ -126,7 +149,6 @@ export function getChatHtml(webviewUri: string): string {
                         break;
 
                     case 'appendStream':
-                        // Inject incoming word slices to active streaming block frame container
                         if (currentStreamDiv) {
                             const contentSpan = currentStreamDiv.querySelector('.stream-content');
                             contentSpan.textContent += message.text;
@@ -134,14 +156,19 @@ export function getChatHtml(webviewUri: string): string {
                         }
                         break;
 
+                    case 'endStream':
+                        // Reset button states back to normal when done
+                        resetUIState();
+                        break;
+
                     case 'showError':
-                        // Append standard error banner layout
+                        resetUIState();
                         chatLog.innerHTML += '<div class="msg ai-msg" style="color: var(--vscode-errorForeground);">❌ ' + message.text + '</div>';
                         chatLog.scrollTop = chatLog.scrollHeight;
                         break;
                         
                     case 'receiveResponse':
-                        // Fallback message processor handler legacy blocks 
+                        resetUIState();
                         chatLog.innerHTML += '<div class="msg ai-msg"><b>AI:</b> ' + message.text + '</div>';
                         chatLog.scrollTop = chatLog.scrollHeight;
                         break;
