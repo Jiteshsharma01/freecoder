@@ -114,7 +114,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             lowerText.includes("workspace") || 
             lowerText.includes("structure") || 
             lowerText.includes("repository") ||
-            lowerText.includes("app") ||
+            lowerText.includes("this app") ||
             lowerText.includes("blueprint");
 
         let finalPromptWithContext = text;

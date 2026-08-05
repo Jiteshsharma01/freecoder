@@ -55,7 +55,7 @@ export function getChatHtml(webviewUri: string): string {
         <div class="row">
             <button id="upload-trigger" style="width: 40px;">📎</button>
             <input type="file" id="file-input" style="display: none;" accept="image/*,.txt,.md,.json,.js,.ts" />
-            <textarea id="user-input" placeholder="Ask a question or request code..."></textarea>
+            <textarea id="user-input" rows=6 placeholder="Ask a question or request code..."></textarea>
         </div>
         <button id="send-btn">Send Message</button>
         
@@ -143,25 +143,69 @@ export function getChatHtml(webviewUri: string): string {
                 document.getElementById('stop-btn').style.display = 'none';
             }
 
+            // // Send Prompt Pipeline
+            // document.getElementById('send-btn').addEventListener('click', () => {
+            //     const text = document.getElementById('user-input').value.trim();
+            //     const provider = document.getElementById('provider').value;
+            //     if (!text && !base64Attachment) return;
+
+            //     const chatLog = document.getElementById('chat-log');
+            //     chatLog.innerHTML += '<div class="msg user-msg"><b>You:</b> ' + text + (attachmentName ? '<br><small>📎 ' + attachmentName + '</small>' : '') + '</div>';
+
+            //     console.log({text, chatLog, ht: chatLog.innerHTML, tex: chatLog.innerText});
+            //     // Force layout lock down after you send a fresh instruction
+            //     scrollToBottom();
+
+            //     vscode.postMessage({
+            //         command: 'sendMessage',
+            //         text: text,
+            //         provider: provider,
+            //         attachment: base64Attachment,
+            //         attachmentType: document.getElementById('file-input').files[0]?.type || null
+            //     });
+
+            //     document.getElementById('user-input').value = '';
+            //     document.getElementById('file-input').value = '';
+            //     document.getElementById('file-preview').innerText = 'No file attached';
+            //     base64Attachment = null;
+            //     attachmentName = null;
+            // });
+
             // Send Prompt Pipeline
             document.getElementById('send-btn').addEventListener('click', () => {
                 const text = document.getElementById('user-input').value.trim();
                 const provider = document.getElementById('provider').value;
                 if (!text && !base64Attachment) return;
 
+                // 🔥 THE FIX: Function to convert code characters into viewable text blocks
+                const safeEscape = (str) => {
+                    return str
+                        .replace(/&/g, "&amp;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;")
+                        .replace(/"/g, "&quot;")
+                        .replace(/'/g, "&#039;");
+                };
+
                 const chatLog = document.getElementById('chat-log');
-                chatLog.innerHTML += '<div class="msg user-msg"><b>You:</b> ' + text + (attachmentName ? '<br><small>📎 ' + attachmentName + '</small>' : '') + '</div>';
-                // Force layout lock down after you send a fresh instruction
+                
+                // 🔥 Escape the raw input before adding it to innerHTML
+                const safeText = safeEscape(text);
+                
+                chatLog.innerHTML += '<div class="msg user-msg"><b>You:</b> ' + safeText + (attachmentName ? '<br><small>📎 ' + attachmentName + '</small>' : '') + '</div>';
+                
                 scrollToBottom();
 
+                // Send the ORIGINAL text to your extension host (Ollama needs the raw unescaped code!)
                 vscode.postMessage({
                     command: 'sendMessage',
-                    text: text,
+                    text: text, 
                     provider: provider,
                     attachment: base64Attachment,
                     attachmentType: document.getElementById('file-input').files[0]?.type || null
                 });
 
+                // Clear controls safely
                 document.getElementById('user-input').value = '';
                 document.getElementById('file-input').value = '';
                 document.getElementById('file-preview').innerText = 'No file attached';
