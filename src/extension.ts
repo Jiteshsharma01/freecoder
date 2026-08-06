@@ -105,9 +105,16 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // 1. SMART CHECK: Look for project context triggers in the user's prompt text
+        // Check for file attachments first (Always processed if present)
+        let attachedFileContext = "";
+        const hasFileAttachment = attachment && !attachmentType?.startsWith('image/');
+        if (hasFileAttachment) {
+            attachedFileContext = `\n\n[USER ATTACHED FILE CONTEXT]\n\`\`\`\n${attachment}\n\`\`\``;
+        }
+
+        // SMART CHECK: Look for project context triggers in the user's prompt text
         const lowerText = text.toLowerCase();
-        const needsContext = 
+        const needsProjectTreeMap = 
             lowerText.includes("project") || 
             lowerText.includes("my code") || 
             lowerText.includes("this file") || 
@@ -117,12 +124,12 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             lowerText.includes("this app") ||
             lowerText.includes("blueprint");
 
-        let finalPromptWithContext = text;
+        let finalPromptWithContext = text + attachedFileContext;
 
-        // 2. Only fetch and append the project tree if context is actually requested
-        if (needsContext) {
+        // Only fetch and append the project tree if context is actually requested
+        if (needsProjectTreeMap) {
             const workspaceTreeContext = await this.getActiveProjectContext();
-            finalPromptWithContext = text + workspaceTreeContext;
+            finalPromptWithContext += workspaceTreeContext;
         }
 
         // Fire initialization container command to HTML frontend UI
@@ -134,10 +141,15 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             if (provider === 'ollama-qwen3-local') {
                 const OLLAMA_URL = "http://localhost:11434/api/chat";
                 
-                // 3. Update the System Prompt to guide the model on how to behave with or without context
-                const systemMessage = needsContext 
-                    ? "You are an expert workspace AI assistant. You have full awareness of the developer's project directory tree structure provided in their prompt context to answer specific architectural questions."
-                    : "You are an expert programming tutor and developer assistant. Answer general concepts, write clean code examples, and assist with general requests directly without assuming it relates to a specific local project.";
+                // Update the System Prompt to guide the model on how to behave with or without context or attachment
+                let systemMessage = "You are an expert programming tutor and developer assistant.";
+                if (hasFileAttachment && needsProjectTreeMap) {
+                    systemMessage = "You are an expert workspace AI assistant. You have full context of the uploaded file AND the developer's project directory tree map layout.";
+                } else if (hasFileAttachment) {
+                    systemMessage = "You are an expert programming assistant. Analyze the specific file context attached by the user to answer their question directly.";
+                } else if (needsProjectTreeMap) {
+                    systemMessage = "You are an expert architectural AI assistant. Review the provided workspace folder map blueprint to guide the user.";
+                }
 
                 const payload = {
                     model: "qwen3-coder:30b",
