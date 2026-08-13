@@ -64,6 +64,19 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
                         this._activeAbortController = null;
                     }
                     break;
+                case 'requestClearConfirmation':{
+                    const selection = await vscode.window.showWarningMessage(
+                        "Are you sure you want to clear your entire chat history log?",
+                        { modal: true }, // 'modal: true' makes it an overlay popup that prevents accidental misclicks
+                        "Yes, Clear Everything"
+                    );
+
+                    // If the user explicitly selects the clear confirmation selection trigger, message the frontend to sweep
+                    if (selection === "Yes, Clear Everything") {
+                        webviewView.webview.postMessage({ command: 'executeConfirmedClear' });
+                    }
+                    break;
+                }
             }
         });
     }

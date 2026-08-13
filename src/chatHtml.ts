@@ -180,23 +180,13 @@ export function getChatHtml(webviewUri: string): string {
 
             // Handle Clear chat click
             document.getElementById('clear-btn').addEventListener('click', () => {
-                // Instantly send the stop command to the backend to kill the network stream
-                vscode.postMessage({ command: 'stopGeneration' });
-
+                // Check if the chat log contains elements before asking to prevent empty click triggers
                 const chatLogEl = document.getElementById('chat-log');
-                if (chatLogEl) {
-                    chatLogEl.innerHTML = ''; // Wipes the screen clear
+                if (!chatLogEl || chatLogEl.innerHTML.trim() === '') {
+                    return; // Skip asking if there is nothing to clear anyway
                 }
-                currentStreamDiv = null;
-                currentResponseText = "";
-
-                // Save the blank history layout back into internal memory states
-                if (typeof resetUIState === 'function') {
-                    resetUIState();
-                }
-                if (typeof saveStateState === 'function') {
-                    saveStateState();
-                }
+                // Ask backend extension layer to prompt the developer natively
+                vscode.postMessage({ command: 'requestClearConfirmation' });
             });
 
             // Handle Hidden File Upload Wrapper
@@ -348,6 +338,25 @@ export function getChatHtml(webviewUri: string): string {
 
                             // Smart scroll focus follow check
                             if (!isUserScrolledUp) { chatLog.scrollTop = chatLog.scrollHeight; }
+                        }
+                        break;
+                    case 'executeConfirmedClear':
+                        // 1. Instantly send the stop command to kill any running background networks
+                        vscode.postMessage({ command: 'stopGeneration' });
+
+                        // 2. Clear out panels and reset streaming variables
+                        if (chatLog) chatLog.innerHTML = '';
+                        currentStreamDiv = null;
+                        currentResponseText = "";
+                        
+                        // 3. Reset inputs and unlock controls
+                        if (typeof resetUIState === 'function') {
+                            resetUIState();
+                        }
+                        
+                        // 4. Update the saved layout state history memory configuration
+                        if (typeof saveStateState === 'function') {
+                            saveStateState();
                         }
                         break;
 
