@@ -7,7 +7,7 @@ export function getChatHtml(webviewUri: string): string {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body { font-family: sans-serif; padding: 10px; display: flex; flex-direction: column; height: 100vh; color: var(--vscode-editor-foreground); background-color: var(--vscode-sideBar-background); box-sizing: border-box; margin: 0; position: relative; }
-            select, button, textarea { width: 100%; margin-bottom: 8px; padding: 8px; border-radius: 4px; border: 1px solid var(--vscode-dropdown-border); background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); box-sizing: border-box; }
+            select, button, textarea { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--vscode-dropdown-border); background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); box-sizing: border-box; }
             button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; cursor: pointer; width: fit-content; }
             button:hover { background: var(--vscode-button-hoverBackground); }
             #selection-box { display: flex; gap: 10px; }
@@ -20,7 +20,7 @@ export function getChatHtml(webviewUri: string): string {
             .user-msg { background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-textBlockQuote-border); max-height: 150px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 11px; }
             .ai-msg { background: var(--vscode-textCodeBlock-background); }
             textarea { resize: none; min-height: 50px; max-height: 120px; overflow-y: auto; box-sizing: border-box; font-size: 12px; }
-            .submit-box { display: flex; gap: 5px; justify-content: flex-end; }
+            .submit-box { display: flex; gap: 5px; justify-content: flex-end; margin-top: 6px; }
             #file-preview { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 5px; }
             .user-content { white-space: pre-wrap; font-family: monospace; }
             .stream-content { white-space: pre-wrap; font-family: monospace; }
@@ -90,6 +90,7 @@ export function getChatHtml(webviewUri: string): string {
             <input type="file" id="file-input" style="display: none;" accept="image/*,.txt,.md,.json,.js,.ts" />
             <button id="send-btn">Generate 🚀</button>
             <button id="stop-btn">Stop AI ⏹️</button>
+            <button id="clear-btn" class="btn-danger" style="width: auto; padding: 0 12px; margin: 0; white-space: nowrap;">🗑️ Clear</button>
         </div>
 
         <script>
@@ -175,6 +176,27 @@ export function getChatHtml(webviewUri: string): string {
             // Handle Map Generation Click
             document.getElementById('map-btn').addEventListener('click', () => {
                 vscode.postMessage({ command: 'generateMap' });
+            });
+
+            // Handle Clear chat click
+            document.getElementById('clear-btn').addEventListener('click', () => {
+                // Instantly send the stop command to the backend to kill the network stream
+                vscode.postMessage({ command: 'stopGeneration' });
+
+                const chatLogEl = document.getElementById('chat-log');
+                if (chatLogEl) {
+                    chatLogEl.innerHTML = ''; // Wipes the screen clear
+                }
+                currentStreamDiv = null;
+                currentResponseText = "";
+
+                // Save the blank history layout back into internal memory states
+                if (typeof resetUIState === 'function') {
+                    resetUIState();
+                }
+                if (typeof saveStateState === 'function') {
+                    saveStateState();
+                }
             });
 
             // Handle Hidden File Upload Wrapper
