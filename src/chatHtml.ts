@@ -65,8 +65,8 @@ export function getChatHtml(webviewUri: string): string {
                 <label for="provider">AI Provider Tool:</label>
                 <select id="provider">
                     <option value="ollama-qwen3-local">Local Ollama (Qwen3-Coder:30b)</option>
-                    <option value="gemini">Gemini Flash (Free Tier)</option>
-                    <option value="huggingface">Hugging Face API</option>
+                    <option value="gemini-cloud">Gemini 1.5 Flash (Cloud - Supports Images & Files)</option>
+                    <option value="huggingface-cloud">Hugging Face API (Cloud - Text Only)</option>
                 </select>
             </div>
             <!-- 2. Project Map Trigger Button -->

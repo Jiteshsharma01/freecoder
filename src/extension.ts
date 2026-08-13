@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { ProxyAgent } from 'undici';
 import { getChatHtml } from './chatHtml';
 import { generateProjectContextMap } from './projectMapper';
 
@@ -68,6 +69,28 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    private getFetchRequestOptions(): any {
+        const config = vscode.workspace.getConfiguration('freeCopilot');
+        const proxyUrl = config.get<string>('proxy')?.trim() || "";
+
+        const options: any = {
+            signal: this._activeAbortController?.signal
+        };
+
+        // If the user specified a custom network tunnel, intercept fetch options
+        if (proxyUrl) {
+            try {
+                // Assign the ProxyAgent dispatcher to force fetch through the corporate gateway
+                options.dispatcher = new ProxyAgent({ uri: proxyUrl });
+            } catch (e: any) {
+                vscode.window.showErrorMessage(`Invalid Proxy URL Configuration: ${e.message}`);
+            }
+        }
+
+        return options;
+    }
+
+
     // Reads explicitly from index 0 of the workspace array to eliminate compile errors
     private async getActiveProjectContext(): Promise<string> {
         const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -87,6 +110,134 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         } catch {
             // Silent fallback if they haven't clicked the map generation button yet
             return "";
+        }
+    }
+
+    private async callCloudGemini(promptText: string, attachmentBase64: string | null, webviewView: vscode.WebviewView) {
+        const config = vscode.workspace.getConfiguration('freeCopilot');
+        const GEMINI_API_KEY = config.get<string>('geminiKey') || ""; 
+
+        if (!GEMINI_API_KEY) {
+            throw new Error("Missing Gemini API Key! Configure it in Settings.");
+        }
+
+        // UPDATED: Target standard content delivery endpoint to bypass Node network socket hanging bugs
+        const url = `https://googleapis.com{GEMINI_API_KEY}`;
+        
+        let partsArray: any[] = [];
+
+        // Safe attachment parsing loop
+        if (attachmentBase64 && attachmentBase64.includes(',')) {
+            try {
+                const parts = attachmentBase64.split(',');
+                const base64Data = parts[1];
+                const mimeMatch = parts[0].match(/data:(.*?);/);
+                const mimeType = mimeMatch ? mimeMatch[1] : "text/plain";
+
+                partsArray.push({ inlineData: { mimeType: mimeType, data: base64Data } });
+            } catch (e) {
+                // Fallback quietly if string indexing splits fail
+            }
+        }
+
+        // Always push the user's primary prompt text into parts array
+        partsArray.push({ text: promptText });
+
+        const payload = {
+            contents: [{ parts: partsArray }]
+        };
+
+        // const response = await globalThis.fetch(url, {
+        //     method: "POST",
+        //     headers: { "Content-Type": "application/json" },
+        //     body: JSON.stringify(payload),
+        //     signal: this._activeAbortController?.signal
+        // });
+        const requestOptions = this.getFetchRequestOptions();
+        const response = await globalThis.fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            ...requestOptions // Dynamically injects proxy dispatcher and abort signals
+        });
+
+        if (!response.ok) { 
+            throw new Error(`Gemini Cloud API rejected request with code HTTP ${response.status}`); 
+        }
+
+        const data = await response.json() as any;
+        const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "⚠️ Received empty text back from Gemini.";
+        
+        // Pipeline text block back to thin-scroll HTML viewer
+        webviewView.webview.postMessage({ command: 'appendStream', text: responseText });
+    }
+
+    private async callCloudHuggingFace(promptText: string, webviewView: vscode.WebviewView) {
+        const config = vscode.workspace.getConfiguration('freeCopilot');
+        const HF_TOKEN = config.get<string>('huggingFaceToken') || "";
+
+        if (!HF_TOKEN) {
+            throw new Error("Missing Hugging Face Token! Configure it in Settings.");
+        }
+
+        // FIXED: Corrected the serverless inference path to use the global endpoint
+        const url = "https://api-inference.huggingface.co/v1/chat/completions";
+
+        const payload = {
+            model: "mistralai/Mistral-7B-Instruct-v0.3", // Specify model explicitly inside payload
+            messages: [{ role: "user", content: promptText }],
+            stream: true,
+            max_tokens: 1000
+        };
+
+        const requestOptions = this.getFetchRequestOptions();
+        const response = await globalThis.fetch(url, {
+            method: "POST",
+            headers: { 
+                "Authorization": `Bearer ${HF_TOKEN}`,
+                "Content-Type": "application/json" 
+            },
+            body: JSON.stringify(payload),
+            signal: this._activeAbortController?.signal,
+            ...requestOptions
+        });
+
+        if (!response.ok) { 
+            // Read errors from backend if 403 or 400 persists
+            const errText = await response.text();
+            throw new Error(`Hugging Face server returned ${response.status} - ${errText}`); 
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        if (!reader) return;
+
+        let buffer = "";
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+                const cleanLine = line.trim();
+                if (!cleanLine.startsWith("data:")) continue;
+                
+                const dataStr = cleanLine.substring(5).trim();
+                if (dataStr === "[DONE]") break;
+
+                try {
+                    const parsed = JSON.parse(dataStr);
+                    const deltaToken = parsed.choices?.[0]?.delta?.content || "";
+                    if (deltaToken) {
+                        webviewView.webview.postMessage({ command: 'appendStream', text: deltaToken });
+                    }
+                } catch {
+                    // Keep gathering line buffers if splits happen mid-token
+                }
+            }
         }
     }
 
@@ -140,7 +291,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         try {
             if (provider === 'ollama-qwen3-local') {
                 const OLLAMA_URL = "http://localhost:11434/api/chat";
-                
                 // Update the System Prompt to guide the model on how to behave with or without context or attachment
                 let systemMessage = "You are an expert programming tutor and developer assistant.";
                 if (hasFileAttachment && needsProjectTreeMap) {
@@ -213,6 +363,14 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
                 
                 webviewView.webview.postMessage({ command: 'endStream' });
 
+            } else if (provider === 'gemini-cloud') {
+                // Stream text and files directly to Google's cloud server
+                await this.callCloudGemini(finalPromptWithContext, attachment, webviewView);
+                webviewView.webview.postMessage({ command: 'endStream' });
+            } else if (provider === 'huggingface-cloud') {
+                // Route to serverless inference text nodes
+                await this.callCloudHuggingFace(finalPromptWithContext, webviewView);
+                webviewView.webview.postMessage({ command: 'endStream' });
             } else {
                 webviewView.webview.postMessage({ 
                     command: 'appendStream', 
@@ -223,12 +381,9 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
         } catch (error: any) {
             if (error.name === 'AbortError') {
-                console.log('Ollama stream generation aborted by the user.');
+                webviewView.webview.postMessage({ command: 'appendStream', text: "\n\n🛑 *Generation stopped by developer.*" });
             } else {
-                webviewView.webview.postMessage({ 
-                    command: 'showError', 
-                    text: `Ollama Connection Error: Failed to talk to local engine. Details: ${error.message}` 
-                });
+                webviewView.webview.postMessage({ command: 'showError', text: `Cloud API Failure Error: ${error.message}` });
             }
         } finally {
             this._activeAbortController = null;

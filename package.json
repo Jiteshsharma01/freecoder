@@ -3,7 +3,7 @@
   "displayName": "FreeCopilot",
   "description": "A free AI assistant with project mapping and asset uploading.",
   "version": "0.0.1",
-  "publisher": "local-itui", 
+  "publisher": "local-itui",
   "engines": {
     "vscode": "^1.125.0"
   },
@@ -38,7 +38,27 @@
         "title": "Free Copilot: Generate Project Structure Map",
         "category": "Free Copilot"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Free Copilot Configuration",
+      "properties": {
+        "freeCopilot.geminiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Your Google AI Studio Gemini API Key."
+        },
+        "freeCopilot.huggingFaceToken": {
+          "type": "string",
+          "default": "",
+          "description": "Your Hugging Face Read Access Token."
+        },
+        "freeCopilot.proxy": {
+          "type": "string",
+          "default": "",
+          "description": "Custom HTTP/HTTPS proxy URL for corporate firewalls (e.g., http://127.0.0.1:8080)."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -49,17 +69,20 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.125.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
-    "typescript-eslint": "^8.61.1",
+    "@types/vscode": "^1.125.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
     "eslint": "^10.5.0",
     "typescript": "^6.0.3",
-    "@vscode/test-cli": "^0.0.15",
-    "@vscode/test-electron": "^3.0.0"
+    "typescript-eslint": "^8.61.1"
   },
   "overrides": {
     "diff": "^8.0.4",
     "serialize-javascript": "^7.0.6"
+  },
+  "dependencies": {
+    "undici": "^8.10.0"
   }
 }
