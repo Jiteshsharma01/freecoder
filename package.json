@@ -37,6 +37,11 @@
         "command": "freeCopilot.generateProjectMap",
         "title": "Free Copilot: Generate Project Structure Map",
         "category": "Free Copilot"
+      },
+      {
+        "command": "freeCopilot.generateKnowledgeGraph",
+        "title": "Free Copilot: Generate Knowledge Graph",
+        "category": "Free Copilot"
       }
     ]
   },
@@ -48,13 +53,15 @@
     "lint": "eslint src",
     "test": "vscode-test"
   },
+  "dependencies": {
+    "typescript": "^6.0.3"
+  },
   "devDependencies": {
     "@types/vscode": "^1.125.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
     "typescript-eslint": "^8.61.1",
     "eslint": "^10.5.0",
-    "typescript": "^6.0.3",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.0.0"
   },

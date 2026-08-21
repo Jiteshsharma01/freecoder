@@ -60,7 +60,6 @@ export function getChatHtml(webviewUri: string): string {
     </head>
     <body>
         <div id="selection-box">
-            <!-- 1. Model Selection -->
             <div id="select-ai">
                 <label for="provider">AI Provider Tool:</label>
                 <select id="provider">
@@ -69,8 +68,10 @@ export function getChatHtml(webviewUri: string): string {
                     <option value="huggingface">Hugging Face API</option>
                 </select>
             </div>
-            <!-- 2. Project Map Trigger Button -->
-            <button id="map-btn">Generate 🛠️🗺️</button>
+            <div style="display: flex; gap: 6px; align-items: end;">
+                <button id="map-btn" class="btn-with-icon">🗺️ Map</button>
+                <button id="graph-btn" class="btn-with-icon">🕸️ Graph</button>
+            </div>
         </div>
 
         <!-- Wrapped log panel inside structural relative frame block -->
@@ -176,6 +177,9 @@ export function getChatHtml(webviewUri: string): string {
             // Handle Map Generation Click
             document.getElementById('map-btn').addEventListener('click', () => {
                 vscode.postMessage({ command: 'generateMap' });
+            });
+            document.getElementById('graph-btn').addEventListener('click', () => {
+                vscode.postMessage({ command: 'generateKnowledgeGraph' });
             });
 
             // Handle Clear chat click
@@ -377,7 +381,7 @@ export function getChatHtml(webviewUri: string): string {
                         if (!isUserScrolledUp) scrollToBottom();
                         break;
                 }
-            });s
+            });
         </script>
     </body>
     </html>`;

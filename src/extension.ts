@@ -2,6 +2,11 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { getChatHtml } from './chatHtml';
 import { generateProjectContextMap } from './projectMapper';
+import { generateKnowledgeGraph } from './projectAnalysis/knowledgeGraph/graphGenerator';
+import { showKnowledgeGraph } from './projectAnalysis/knowledgeGraph/graphView';
+import { analyzeProject } from './projectAnalysis/projectAnalyzer';
+import { generateProjectMap } from './projectAnalysis/mappers/genericMapper';
+import { getWorkspaceRoot } from './projectAnalysis/workspace';
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -12,7 +17,32 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.showInformationMessage(`Context Map successfully created at project root!`);
         }
     });
-    context.subscriptions.push(mapCmd);
+    const graphCmd = vscode.commands.registerCommand('freeCopilot.generateKnowledgeGraph', async () => {
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            vscode.window.showErrorMessage('Please open a workspace project first!');
+            return;
+        }
+
+        const rootPath = workspaceFolders[0].uri.fsPath;
+        try {
+            // 1. Scan + detect + analyze project
+            const analysis = await analyzeProject(rootPath);
+            // 2. Generate graph from the analysis
+            const graph = await generateKnowledgeGraph(analysis);
+            // 3. Open graph visualization
+            if (graph) {
+                showKnowledgeGraph(context.extensionUri, graph);
+            }
+
+        } catch (error: any) {
+            vscode.window.showErrorMessage(
+                `Knowledge graph generation failed: ${error.message}`
+            );
+        }
+        }
+    );
+    context.subscriptions.push(mapCmd, graphCmd);
 
     // Register Webview View Sidebar Provider Container interface
     const chatProvider = new FreeCopilotViewProvider(context.extensionUri);
@@ -52,9 +82,33 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         // Intercept incoming interface pipeline events 
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.command) {
-                case 'generateMap':
-                    await generateProjectContextMap();
+                case 'generateMap': {
+                    const rootPath = getWorkspaceRoot();
+                    if (!rootPath) { break; }
+                    try {
+                        const analysis = await analyzeProject(rootPath);
+                        await generateProjectMap(rootPath, analysis);
+                        vscode.window.showInformationMessage('Project Overview generated.');
+                    } catch (error: any) {
+                        vscode.window.showErrorMessage(`Project mapping failed: ${error.message}`);
+                    }
                     break;
+                }
+                case 'generateKnowledgeGraph': {
+                    const rootPath = getWorkspaceRoot();
+                    if (!rootPath) { break; }
+                    try {
+                        const analysis = await analyzeProject(rootPath);
+                        const graph = await generateKnowledgeGraph(analysis);
+                        if (graph) {
+                            showKnowledgeGraph(this._extensionUri, graph);
+                        }
+
+                    } catch (error: any) {
+                        vscode.window.showErrorMessage(`Knowledge graph generation failed: ${error.message}`);
+                    }
+                    break;
+                }
                 case 'sendMessage':
                     await this.handleChatMessage(data, webviewView);
                     break;
