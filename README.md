@@ -103,6 +103,7 @@ Before running this extension, make sure you configure your background AI engine
 ### 2. Multi-Modal Assets (Gemini / Free API)
 
 * Switch your model provider dropdown to **Gemini Flash** or alternate online services if you need to upload visual file images for processing. (Future implementaion)
+* Once verified, you are 100% ready to package the clean production build file use following command: `vsce package --allow-missing-repository`
 
 ## 🚀 How To Use
 
