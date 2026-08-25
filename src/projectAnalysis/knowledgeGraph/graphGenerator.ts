@@ -9,6 +9,7 @@ import {
   KnowledgeGraphNode,
 } from "./types";
 import { ProjectAnalysis } from "../types";
+import { saveKnowledgeGraph } from "./graphStorage";
 
 export async function generateKnowledgeGraph(
   analysis: ProjectAnalysis,
@@ -192,19 +193,6 @@ async function resolveImport(
   }
 
   return null;
-}
-
-async function saveKnowledgeGraph(
-  rootPath: string,
-  graph: KnowledgeGraph,
-): Promise<void> {
-  const outputDirectory = path.join(rootPath, ".freecopilot");
-
-  await fs.mkdir(outputDirectory, { recursive: true });
-
-  const outputPath = path.join(outputDirectory, "knowledge-graph.json");
-
-  await fs.writeFile(outputPath, JSON.stringify(graph, null, 2), "utf8");
 }
 
 function normalizePath(filePath: string): string {

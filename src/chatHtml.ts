@@ -91,10 +91,12 @@ export function getChatHtml(webviewUri: string): string {
             <input type="file" id="file-input" style="display: none;" accept="image/*,.txt,.md,.json,.js,.ts" />
             <button id="send-btn">Generate 🚀</button>
             <button id="stop-btn">Stop AI ⏹️</button>
+            <button id="agent-btn">Agent ✏️</button>
             <button id="clear-btn" class="btn-danger" style="width: auto; padding: 0 12px; margin: 0; white-space: nowrap;">🗑️ Clear</button>
         </div>
 
         <script>
+            console.log('FreeCopilot WebView loaded');
             const vscode = acquireVsCodeApi();
             let base64Attachment = null;
             let attachmentName = null;
@@ -102,6 +104,9 @@ export function getChatHtml(webviewUri: string): string {
             let currentResponseText = "";
             const DEFAULT_HEIGHT = '50px';
             let apiLoadingIndicator = null;
+            let agentProgressDiv = null;
+            let agentPlanDiv = null;
+            let agentReviewDiv = null;
 
             // Track scrolling state explicitly
             let isUserScrolledUp = false; 
@@ -236,6 +241,137 @@ export function getChatHtml(webviewUri: string): string {
                 const activeLoader = document.getElementById('ai-embedded-loader');
                 if (activeLoader) activeLoader.remove();
             }
+            
+            function showAgentStatus(text) {
+                const chatLog = document.getElementById('chat-log');
+                if (!chatLog) { return; }
+                const status = document.createElement('div');
+                status.className = 'msg ai-msg';
+                status.style.fontSize = '12px';
+                status.style.opacity = '0.85';
+                status.innerText = text;
+                chatLog.appendChild(status);
+                scrollToBottom();
+            }
+            
+            function renderApplyButton() {
+                var chatLog =
+                    document.getElementById(
+                        'chat-log'
+                    );
+
+                if (!chatLog) {
+                    return;
+                }
+
+                if (agentReviewDiv) {
+                    agentReviewDiv.remove();
+                }
+
+                agentReviewDiv =
+                    document.createElement(
+                        'div'
+                    );
+
+                agentReviewDiv.className =
+                    'msg ai-msg';
+
+                agentReviewDiv.innerHTML =
+                    '<div style="font-weight: 600;">' +
+                        '🔍 Review Changes' +
+                    '</div>' +
+
+                    '<div style="' +
+                        'margin-top: 6px;' +
+                        'font-size: 11px;' +
+                        'opacity: 0.8;' +
+                    '">' +
+                        'The proposed changes are open in ' +
+                        'the VS Code diff editor.' +
+                    '</div>' +
+
+                    '<div style="' +
+                        'display: flex;' +
+                        'gap: 6px;' +
+                        'margin-top: 10px;' +
+                    '">' +
+
+                        '<button ' +
+                            'id="apply-agent-changes" ' +
+                            'style="width: auto;"' +
+                        '>' +
+                            'Apply All Changes' +
+                        '</button>' +
+
+                        '<button ' +
+                            'id="cancel-agent-changes" ' +
+                            'style="width: auto;"' +
+                        '>' +
+                            'Cancel' +
+                        '</button>' +
+
+                    '</div>';
+
+                chatLog.appendChild(
+                    agentReviewDiv
+                );
+
+                var applyButton =
+                    agentReviewDiv.querySelector(
+                        '#apply-agent-changes'
+                    );
+
+                var cancelButton =
+                    agentReviewDiv.querySelector(
+                        '#cancel-agent-changes'
+                    );
+
+                if (applyButton) {
+                    applyButton.addEventListener(
+                        'click',
+                        function() {
+
+                            applyButton.disabled =
+                                true;
+
+                            applyButton.innerText =
+                                'Applying...';
+
+                            if (cancelButton) {
+                                cancelButton.disabled =
+                                    true;
+                            }
+
+                            vscode.postMessage({
+                                command:
+                                    'applyAgentTask'
+                            });
+                        }
+                    );
+                }
+
+                if (cancelButton) {
+                    cancelButton.addEventListener(
+                        'click',
+                        function() {
+
+                            vscode.postMessage({
+                                command:
+                                    'cancelAgentTask'
+                            });
+
+                            if (agentReviewDiv) {
+                                agentReviewDiv.remove();
+                                agentReviewDiv = null;
+                            }
+
+                            removeAgentProgress();
+                        }
+                    );
+                }
+
+                scrollToBottom();
+            }
 
             const textarea = document.getElementById('user-input');
             textarea.addEventListener('input', function () {
@@ -247,6 +383,34 @@ export function getChatHtml(webviewUri: string): string {
                 // Otherwise, handle dynamic growing up to your CSS max-height
                 this.style.height = 'auto';
                 this.style.height = this.scrollHeight + 'px';
+            });
+
+            document.getElementById('agent-btn').addEventListener('click', () => {
+                var userInputEl = document.getElementById('user-input');
+                var text = userInputEl.value.trim();
+                if (!text) { return; }
+                var chatLog = document.getElementById('chat-log');
+                var safeEscape = function(value) {
+                    return String(value || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#039;');
+                };
+                chatLog.innerHTML +=
+                    '<div class="msg user-msg">' +
+                        '<b style="font-size: 13px;">You → Agent:</b>' +
+                        '<div class="user-content" style="white-space: pre-wrap; margin-top: 4px;">' +
+                            safeEscape(text) +
+                        '</div>' +
+                    '</div>';
+                scrollToBottom();
+                createAgentProgress();
+                updateAgentProgress('planning', 'Understanding your request...');
+                vscode.postMessage({command: 'agentRequest', message: text});
+                userInputEl.value = '';
+                userInputEl.style.height = DEFAULT_HEIGHT;
             });
 
             // Send Prompt Pipeline
@@ -301,6 +465,578 @@ export function getChatHtml(webviewUri: string): string {
                 base64Attachment = null;
                 attachmentName = null;
             });
+
+            function renderAgentPlan(plan) {
+                var chatLog = document.getElementById('chat-log');
+                if (!chatLog) { return; }
+
+                /*
+                * Remove any previous Agent Plan card before creating a new one.
+                */
+                if (agentPlanDiv) {
+                    agentPlanDiv.remove();
+                    agentPlanDiv = null;
+                }
+
+                var safeEscape = function(value) {
+                    return String(value || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#039;');
+                };
+
+                /*
+                * Build the file-change summary.
+                */
+                var changesHtml = '';
+
+                if (
+                    Array.isArray(plan.changes) &&
+                    plan.changes.length > 0
+                ) {
+                    plan.changes.forEach(function(change) {
+                        var operationLabel = safeEscape(change.operation || 'modify');
+                        var explanation = safeEscape(change.explanation || 'No explanation provided.');
+                        changesHtml +=
+                            '<div style="' +
+                                'padding: 8px;' +
+                                'margin-bottom: 6px;' +
+                                'border: 1px solid var(--vscode-panel-border);' +
+                                'border-radius: 4px;' +
+                                'background: var(--vscode-textCodeBlock-background);' +
+                            '">' +
+
+                                '<div style="' +
+                                    'font-weight: 600;' +
+                                    'word-break: break-word;' +
+                                '">' +
+                                    safeEscape(
+                                        change.path
+                                    ) +
+                                '</div>' +
+
+                                '<div style="' +
+                                    'font-size: 11px;' +
+                                    'margin-top: 4px;' +
+                                    'opacity: 0.8;' +
+                                '">' +
+                                    operationLabel +
+                                    ' — ' +
+                                    explanation +
+                                '</div>' +
+
+                            '</div>';
+                    });
+                } else {
+                    changesHtml =
+                        '<div style="' +
+                            'font-size: 11px;' +
+                            'opacity: 0.7;' +
+                        '">' +
+                            'No individual file changes were listed in the plan.' +
+                        '</div>';
+                }
+
+                /*
+                * Create Agent Plan card.
+                */
+                agentPlanDiv = document.createElement('div');
+                agentPlanDiv.className = 'msg ai-msg';
+                agentPlanDiv.id = 'agent-plan-card';
+                agentPlanDiv.innerHTML =
+                    '<div style="' +
+                        'font-weight: 600;' +
+                        'font-size: 13px;' +
+                    '">' +
+                        '🧠 Agent Plan' +
+                    '</div>' +
+
+                    '<div style="' +
+                        'margin-top: 7px;' +
+                        'font-size: 12px;' +
+                        'line-height: 1.5;' +
+                    '">' +
+                        safeEscape(
+                            plan.summary ||
+                            'No summary provided.'
+                        ) +
+                    '</div>' +
+
+                    '<div style="' +
+                        'margin-top: 7px;' +
+                        'font-size: 11px;' +
+                        'line-height: 1.5;' +
+                        'opacity: 0.8;' +
+                    '">' +
+                        safeEscape(
+                            plan.reasoning ||
+                            ''
+                        ) +
+                    '</div>' +
+
+                    '<div style="' +
+                        'margin-top: 10px;' +
+                    '">' +
+                        changesHtml +
+                    '</div>' +
+
+                    '<div style="' +
+                        'display: flex;' +
+                        'gap: 6px;' +
+                        'margin-top: 10px;' +
+                        'align-items: center;' +
+                    '">' +
+
+                        '<button ' +
+                            'id="generate-agent-changes-btn" ' +
+                            'style="' +
+                                'width: auto;' +
+                                'transition: opacity 0.15s ease;' +
+                            '"' +
+                        '>' +
+                            'Generate Changes' +
+                        '</button>' +
+
+                        '<button ' +
+                            'id="cancel-agent-plan-btn" ' +
+                            'style="' +
+                                'width: auto;' +
+                            '"' +
+                        '>' +
+                            'Cancel' +
+                        '</button>' +
+
+                    '</div>';
+
+                chatLog.appendChild(agentPlanDiv);
+
+                /*
+                * Get buttons after the card has been added to the DOM.
+                */
+                var generateButton = agentPlanDiv.querySelector('#generate-agent-changes-btn');
+                var cancelButton = agentPlanDiv.querySelector('#cancel-agent-plan-btn');
+
+                if (generateButton) {
+                    generateButton.addEventListener('click', function() {
+                        generateButton.disabled = true;
+                        generateButton.innerText = 'Generating...';
+                        generateButton.style.opacity = '0.6';
+                        generateButton.style.cursor = 'not-allowed';
+
+                        /*
+                        * Cancel is also disabled because
+                        * the generation operation has now started.
+                        *
+                        * The user should use "Stop Agent"
+                        * from the Agent progress card instead.
+                        */
+                        if (cancelButton) {
+                            cancelButton.disabled = true;
+                            cancelButton.style.opacity = '0.5';
+                            cancelButton.style.cursor = 'not-allowed';
+                            cancelButton.innerText = 'Cancel';
+                        }
+
+                        /*
+                        * Notify the extension host.
+                        */
+                        vscode.postMessage({command: 'generateAgentChanges'});
+                    });
+                }
+
+                /*
+                * Cancel Plan
+                *
+                * This is available only while the
+                * plan is waiting for approval.
+                */
+                if (cancelButton) {
+                    cancelButton.addEventListener('click', function() {
+                        /*
+                        * Prevent repeated cancellation clicks.
+                        */
+                        cancelButton.disabled = true;
+                        cancelButton.style.opacity = '0.5';
+                        cancelButton.style.cursor = 'not-allowed';
+
+                        /*
+                        * Tell extension host to cancel
+                        * the current Agent task.
+                        */
+                        vscode.postMessage({command: 'cancelAgentTask'});
+
+                        /*
+                        * Remove the plan immediately
+                        * from the WebView.
+                        */
+                        if (agentPlanDiv) {
+                            agentPlanDiv.remove();
+                            agentPlanDiv = null;
+                        }
+                        /*
+                        * Remove Agent progress.
+                        */
+                        removeAgentProgress();
+                    });
+                }
+                scrollToBottom();
+            }
+
+            var AGENT_STAGES = [
+                {
+                    id: 'planning',
+                    label: 'Understanding request'
+                },
+                {
+                    id: 'context',
+                    label: 'Reviewing current file and related files'
+                },
+                {
+                    id: 'plan',
+                    label: 'Creating agent plan'
+                },
+                {
+                    id: 'planApproval',
+                    label: 'Waiting for plan approval'
+                },
+                {
+                    id: 'changes',
+                    label: 'Generating file changes'
+                },
+                {
+                    id: 'diff',
+                    label: 'Opening VS Code diff'
+                },
+                {
+                    id: 'diffApproval',
+                    label: 'Waiting for diff approval'
+                },
+                {
+                    id: 'applying',
+                    label: 'Applying changes'
+                },
+                {
+                    id: 'completed',
+                    label: 'Changes applied'
+                }
+            ];
+
+            function createAgentProgress() {
+                var chatLog =
+                    document.getElementById(
+                        'chat-log'
+                    );
+
+                if (!chatLog) {
+                    return;
+                }
+
+                if (agentProgressDiv) {
+                    agentProgressDiv.remove();
+                    agentProgressDiv = null;
+                }
+
+                agentProgressDiv =
+                    document.createElement(
+                        'div'
+                    );
+
+                agentProgressDiv.className =
+                    'msg ai-msg';
+
+                agentProgressDiv.id =
+                    'agent-progress';
+
+                /*
+                * IMPORTANT:
+                * Every string here is explicitly joined with +.
+                * There are no accidental adjacent string literals.
+                */
+                agentProgressDiv.innerHTML =
+                    '<div style="font-weight: 600;">' +
+                        '🧠 FreeCopilot Agent' +
+                    '</div>' +
+
+                    '<div ' +
+                        'id="agent-progress-list" ' +
+                        'style="' +
+                            'margin-top: 8px;' +
+                            'font-size: 12px;' +
+                            'line-height: 1.8;' +
+                        '"' +
+                    '></div>' +
+
+                    '<div ' +
+                        'id="agent-progress-status" ' +
+                        'style="' +
+                            'margin-top: 6px;' +
+                            'font-size: 11px;' +
+                            'opacity: 0.7;' +
+                        '"' +
+                    '></div>' +
+
+                    '<div style="margin-top: 8px;">' +
+                        '<button ' +
+                            'id="agent-stop-btn" ' +
+                            'style="' +
+                                'display: none;' +
+                                'width: auto;' +
+                            '"' +
+                        '>' +
+                            'Stop Agent ⏹️' +
+                        '</button>' +
+                    '</div>';
+
+                chatLog.appendChild(
+                    agentProgressDiv
+                );
+
+                /*
+                * IMPORTANT:
+                * The stop button is queried only AFTER
+                * agentProgressDiv has been created and added.
+                */
+                var stopButton =
+                    agentProgressDiv.querySelector(
+                        '#agent-stop-btn'
+                    );
+
+                if (stopButton) {
+                    stopButton.addEventListener(
+                        'click',
+                        function() {
+
+                            stopButton.disabled =
+                                true;
+
+                            stopButton.innerText =
+                                'Stopping...';
+
+                            vscode.postMessage({
+                                command:
+                                    'stopAgent'
+                            });
+                        }
+                    );
+                }
+
+                renderAgentProgress(
+                    'planning',
+                    false
+                );
+
+                scrollToBottom();
+            }
+
+            function renderAgentProgress(
+                activeStage,
+                completed
+            ) {
+                if (!agentProgressDiv) {
+                    createAgentProgress();
+                }
+
+                if (!agentProgressDiv) {
+                    return;
+                }
+
+                var container =
+                    agentProgressDiv.querySelector(
+                        '#agent-progress-list'
+                    );
+
+                if (!container) {
+                    return;
+                }
+
+                var activeIndex =
+                    AGENT_STAGES.findIndex(
+                        function(stage) {
+                            return stage.id === activeStage;
+                        }
+                    );
+
+                var html = '';
+
+                AGENT_STAGES.forEach(
+                    function(stage, index) {
+
+                        var icon = '○';
+                        var opacity = '0.45';
+
+                        if (completed) {
+                            icon = '✓';
+                            opacity = '1';
+
+                        } else if (
+                            index < activeIndex
+                        ) {
+                            icon = '✓';
+                            opacity = '1';
+
+                        } else if (
+                            index === activeIndex
+                        ) {
+                            icon = '●';
+                            opacity = '1';
+                        }
+
+                        /*
+                        * Before completion, the completed stage
+                        * remains an empty circle.
+                        */
+                        if (
+                            stage.id === 'completed' &&
+                            !completed
+                        ) {
+                            icon = '○';
+                            opacity = '0.45';
+                        }
+
+                        html +=
+                            '<div style="' +
+                                'display:flex;' +
+                                'align-items:center;' +
+                                'gap:7px;' +
+                                'opacity:' +
+                                opacity +
+                                ';' +
+                            '">' +
+
+                                '<span>' +
+                                    icon +
+                                '</span>' +
+
+                                '<span>' +
+                                    stage.label +
+                                '</span>' +
+
+                            '</div>';
+                    }
+                );
+
+                container.innerHTML =
+                    html;
+
+                scrollToBottom();
+            }
+
+            function updateAgentProgress(
+                stage,
+                text
+            ) {
+                if (!agentProgressDiv) {
+                    createAgentProgress();
+                }
+
+                if (!agentProgressDiv) {
+                    return;
+                }
+
+                renderAgentProgress(
+                    stage,
+                    false
+                );
+
+                var status =
+                    agentProgressDiv.querySelector(
+                        '#agent-progress-status'
+                    );
+
+                if (status) {
+                    status.textContent =
+                        text || '';
+                }
+
+                /*
+                * Stop Agent is available only while
+                * an AI operation is running.
+                */
+                setAgentStopButtonVisible(
+                    stage === 'planning' ||
+                    stage === 'context' ||
+                    stage === 'plan' ||
+                    stage === 'changes'
+                );
+            }
+
+            function setAgentStopButtonVisible(
+                visible
+            ) {
+                if (!agentProgressDiv) {
+                    return;
+                }
+
+                var button =
+                    agentProgressDiv.querySelector(
+                        '#agent-stop-btn'
+                    );
+
+                if (!button) {
+                    return;
+                }
+
+                button.style.display =
+                    visible
+                        ? 'inline-block'
+                        : 'none';
+
+                if (visible) {
+                    button.disabled =
+                        false;
+
+                    button.innerText =
+                        'Stop Agent ⏹️';
+
+                    button.style.opacity =
+                        '1';
+
+                    button.style.cursor =
+                        'pointer';
+                }
+            }
+
+            function completeAgentProgress(
+                text
+            ) {
+                if (!agentProgressDiv) {
+                    return;
+                }
+
+                renderAgentProgress(
+                    'completed',
+                    true
+                );
+
+                var status =
+                    agentProgressDiv.querySelector(
+                        '#agent-progress-status'
+                    );
+
+                if (status) {
+                    status.textContent =
+                        text ||
+                        'All changes were applied successfully.';
+                }
+
+                setAgentStopButtonVisible(
+                    false
+                );
+
+                scrollToBottom();
+            }
+
+            function removeAgentProgress() {
+                if (agentProgressDiv) {
+                    agentProgressDiv.remove();
+                    agentProgressDiv = null;
+                }
+
+                agentPlanDiv = null;
+                agentReviewDiv = null;
+            }
 
             // Stream Receiver Event Listener Loop
             window.addEventListener('message', event => {
@@ -363,6 +1099,67 @@ export function getChatHtml(webviewUri: string): string {
                             saveStateState();
                         }
                         break;
+                    
+                    case "agentProgress":
+                        updateAgentProgress(message.stage, message.text);
+                        break;
+
+                    case 'agentPlan':
+                        updateAgentProgress('planApproval', 'Review the proposed plan.');
+                        renderAgentPlan(message.plan);
+                        break;
+
+                    case 'agentExecutionStarted':
+                        updateAgentProgress('changes', 'Generating the actual file changes...');
+                        break;
+
+                    case 'agentDiffReady':
+                        updateAgentProgress('diff', 'Opening the proposed changes in VS Code...');
+                        break;
+
+                    case 'agentAwaitingApply':
+                        updateAgentProgress('diffApproval', 'Review the diff before applying changes.');
+                        renderApplyButton();
+                        break;
+
+                    case 'agentApplyingChanges':
+                        updateAgentProgress('applying', 'Applying approved changes...');
+                        break;
+
+                    case "agentPlanAccepted":
+                        if (agentPlanDiv) {
+                            agentPlanDiv.remove();
+                            agentPlanDiv = null;
+                        }
+                        break;
+
+                    case 'agentExecutionCompleted':
+                        if (agentPlanDiv) {
+                            agentPlanDiv.remove();
+                            agentPlanDiv = null;
+                        }
+                        if (agentReviewDiv) {
+                            agentReviewDiv.remove();
+                            agentReviewDiv = null;
+                        }
+                        completeAgentProgress('All approved changes were applied successfully.');
+                        break;
+
+                    case 'agentExecutionCancelled':
+                        if (agentPlanDiv) {
+                            agentPlanDiv.remove();
+                            agentPlanDiv = null;
+                        }
+                        if (agentReviewDiv) {
+                            agentReviewDiv.remove();
+                            agentReviewDiv = null;
+                        }
+                        removeAgentProgress();
+                        break;
+
+                    case 'agentExecutionFailed':
+                        showAgentStatus('❌ ' + message.text);
+                        break;
 
                     case 'endStream':
                         resetUIState();
@@ -382,6 +1179,8 @@ export function getChatHtml(webviewUri: string): string {
                         break;
                 }
             });
+
+            console.log('FreeCopilot WebView initialization complete');
         </script>
     </body>
     </html>`;
