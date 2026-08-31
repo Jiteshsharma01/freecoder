@@ -20,6 +20,7 @@ import {
   FREECOPILOT_DIFF_SCHEME,
   FreeCopilotDiffProvider,
 } from "./agent/virtualDiffProvider";
+import { ProjectAnalysis } from "./projectAnalysis/types";
 
 export function activate(context: vscode.ExtensionContext) {
   const diffProvider = new FreeCopilotDiffProvider();
@@ -97,6 +98,92 @@ export function activate(context: vscode.ExtensionContext) {
       },
     ),
   );
+}
+
+function looksLikeExplicitPath(value: string): boolean {
+  return value.includes("/") || value.includes("\\");
+}
+
+function extractDeleteTarget(instruction: string): string | null {
+  /*
+   * Supports:
+   *
+   * Remove file testFile.tsx
+   * Remove testFile.tsx
+   * Remove src/utils/testFile.tsx
+   * Delete "src/utils/testFile.tsx"
+   */
+  const match = instruction.match(
+    /\b(?:remove|delete|erase)\s+(?:the\s+)?(?:file\s+)?[`"']?([A-Za-z0-9_$./\\-]+)[`"']?/i,
+  );
+
+  return match?.[1]?.trim() ?? null;
+}
+
+function normalizeWorkspacePath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.\/+/, "");
+}
+
+function resolveDeleteCandidates(
+  instruction: string,
+  analysis: ProjectAnalysis,
+): {
+  requestedName: string;
+  matches: string[];
+} | null {
+  const requestedName = extractDeleteTarget(instruction);
+
+  if (!requestedName) {
+    return null;
+  }
+
+  const normalizedRequest = normalizeWorkspacePath(requestedName);
+
+  /*
+   * ---------------------------------------------------------
+   * Explicit path
+   *
+   * Example:
+   *
+   * Remove src/utils/testFile.tsx
+   *
+   * In this situation don't search by filename.
+   * ---------------------------------------------------------
+   */
+  if (looksLikeExplicitPath(normalizedRequest)) {
+    const exactMatch = analysis.files.find(
+      (file) => normalizeWorkspacePath(file.path) === normalizedRequest,
+    );
+
+    return {
+      requestedName,
+      matches: exactMatch ? [normalizeWorkspacePath(exactMatch.path)] : [],
+    };
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * Filename-only request
+   *
+   * Example:
+   *
+   * Remove testFile.tsx
+   *
+   * Search the complete ProjectAnalysis instead of
+   * allowing Qwen to guess which file was intended.
+   * ---------------------------------------------------------
+   */
+  const normalizedName = requestedName.toLowerCase().trim();
+
+  const matches = analysis.files
+    .filter((file) => file.name.toLowerCase().trim() === normalizedName)
+    .map((file) => normalizeWorkspacePath(file.path))
+    .filter((filePath, index, all) => all.indexOf(filePath) === index);
+
+  return {
+    requestedName,
+    matches,
+  };
 }
 
 class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
@@ -591,6 +678,11 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleAgentRequest(instruction: string): Promise<void> {
+    /*
+     * ---------------------------------------------------------
+     * 1. Prevent concurrent Agent tasks.
+     * ---------------------------------------------------------
+     */
     if (this.isAgentBusy()) {
       vscode.window.showWarningMessage(
         "A FreeCopilot Agent task is already in progress. Complete or cancel it before starting another Agent task.",
@@ -598,58 +690,220 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
       this._webviewView?.webview.postMessage({
         command: "agentBusy",
+
         text: "An Agent task is already running. Complete or cancel it before starting another one.",
       });
 
       return;
     }
+
+    /*
+     * ---------------------------------------------------------
+     * 2. Prevent Agent from starting while normal AI chat is
+     *    still running.
+     *
+     *    This is primarily a UI guard, but keeping this check
+     *    in the extension host is safer.
+     * ---------------------------------------------------------
+     */
+    if (this._activeAbortController) {
+      vscode.window.showWarningMessage(
+        "Please stop the current AI generation before starting an Agent task.",
+      );
+
+      this._webviewView?.webview.postMessage({
+        command: "agentBusy",
+
+        text: "Stop the current AI generation before starting an Agent task.",
+      });
+
+      return;
+    }
+
     const rootPath = getWorkspaceRoot();
 
     if (!rootPath) {
       return;
     }
 
+    /*
+     * Keep the original user request untouched.
+     * We will only append resolved workspace context.
+     */
+    let agentInstruction = instruction;
+
     try {
+      /*
+       * -------------------------------------------------------
+       * 3. Start Agent cancellation controller.
+       * -------------------------------------------------------
+       */
       this._agentAbortController = new AbortController();
+
+      /*
+       * -------------------------------------------------------
+       * 4. Initial Agent UI state.
+       * -------------------------------------------------------
+       */
       this._webviewView?.show(true);
 
-      // STEP 1
       this._webviewView?.webview.postMessage({
         command: "agentProgress",
+
         stage: "planning",
+
         text: "Understanding your request...",
       });
 
+      /*
+       * -------------------------------------------------------
+       * 5. Analyze project.
+       * -------------------------------------------------------
+       */
       const analysis = await analyzeProject(rootPath);
 
       if (this._agentAbortController.signal.aborted) {
         return;
       }
 
-      let graph = await loadKnowledgeGraph(rootPath);
+      /*
+       * -------------------------------------------------------
+       * 6. Resolve destructive DELETE requests before
+       *    sending them to the LLM.
+       *
+       *    This is deterministic and prevents Qwen from
+       *    choosing between multiple files with the same name.
+       * -------------------------------------------------------
+       */
+      const isDeleteRequest = /\b(?:remove|delete|erase)\b/i.test(instruction);
 
-      // STEP 2
-      this._webviewView?.webview.postMessage({
-        command: "agentProgress",
-        stage: "context",
-        text: "Reviewing current file and related files...",
-      });
+      if (isDeleteRequest) {
+        const deleteResolution = resolveDeleteCandidates(instruction, analysis);
 
-      graph ??= await generateKnowledgeGraph(analysis);
+        if (deleteResolution && deleteResolution.matches.length === 0) {
+          const message = `Could not find a file named "${deleteResolution.requestedName}" in the workspace.`;
+
+          vscode.window.showWarningMessage(message);
+
+          this._webviewView?.webview.postMessage({
+            command: "agentExecutionFailed",
+
+            text: message,
+          });
+
+          return;
+        }
+
+        if (deleteResolution && deleteResolution.matches.length > 1) {
+          /*
+           * Multiple files have the same filename.
+           *
+           * The user MUST decide which one is intended.
+           */
+          const selected = await vscode.window.showQuickPick(
+            deleteResolution.matches,
+            {
+              title: `Multiple files named "${deleteResolution.requestedName}" were found`,
+
+              placeHolder: "Select the file you want FreeCopilot to remove",
+
+              ignoreFocusOut: true,
+            },
+          );
+
+          /*
+           * User closed the QuickPick.
+           */
+          if (!selected) {
+            this._webviewView?.webview.postMessage({command: "agentExecutionCancelled"});
+            return;
+          }
+
+          /*
+           * Give the planner the exact path selected
+           * by the user.
+           */
+          agentInstruction = [
+            instruction,
+            "",
+            "================ RESOLVED DELETE TARGET ================",
+            `The user explicitly selected this file for deletion: ${selected}`,
+            "Use this exact workspace path.",
+            "Do not select another file with the same filename.",
+            "==========================================================",
+          ].join("\n");
+        } else if (deleteResolution && deleteResolution.matches.length === 1) {
+
+        /*
+         * One exact match.
+         *
+         * No dialog necessary.
+         */
+          const selected = deleteResolution.matches[0];
+
+          agentInstruction = [
+            instruction,
+            "",
+            "================ RESOLVED DELETE TARGET ================",
+            `Resolved workspace file: ${selected}`,
+            "Use this exact workspace path for the delete operation.",
+            "==========================================================",
+          ].join("\n");
+        }
+      }
 
       if (this._agentAbortController.signal.aborted) {
         return;
       }
 
-      // STEP 3
+      /*
+       * -------------------------------------------------------
+       * 7. Load existing graph.
+       * -------------------------------------------------------
+       */
+      let graph = await loadKnowledgeGraph(rootPath);
+
+      /*
+       * -------------------------------------------------------
+       * 8. Update progress.
+       * -------------------------------------------------------
+       */
       this._webviewView?.webview.postMessage({
         command: "agentProgress",
+
+        stage: "context",
+
+        text: "Reviewing current file and related files...",
+      });
+
+      /*
+       * -------------------------------------------------------
+       * 9. Generate graph if it doesn't exist.
+       * -------------------------------------------------------
+       */
+      if (!graph) {
+        graph = await generateKnowledgeGraph(analysis);
+      }
+
+      if (this._agentAbortController.signal.aborted) {
+        return;
+      }
+
+      /*
+       * -------------------------------------------------------
+       * 10. Planning stage.
+       * -------------------------------------------------------
+       */
+      this._webviewView?.webview.postMessage({
+        command: "agentProgress",
+
         stage: "plan",
+
         text: "Creating the agent plan...",
       });
 
       const task = await runAgentTask(
-        instruction,
+        agentInstruction,
         rootPath,
         graph,
         analysis,
@@ -659,33 +913,56 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       if (this._agentAbortController.signal.aborted) {
         return;
       }
+
+      /*
+       * -------------------------------------------------------
+       * 11. Store the current task.
+       * -------------------------------------------------------
+       */
       this._currentTask = task;
 
-      // STEP 4
+      /*
+       * -------------------------------------------------------
+       * 12. Wait for user approval of the plan.
+       * -------------------------------------------------------
+       */
       this._webviewView?.webview.postMessage({
         command: "agentProgress",
+
         stage: "planApproval",
+
         text: "Review the proposed plan.",
       });
 
       this._webviewView?.webview.postMessage({
         command: "agentPlan",
+
         plan: task,
       });
     } catch (error: any) {
+      /*
+       * An AbortError is an expected cancellation.
+       */
       if (error?.name === "AbortError") {
         return;
       }
 
-      const message = error?.message ?? "Unknown agent error.";
+      const message = error?.message ?? "Unknown Agent error.";
 
       this._webviewView?.webview.postMessage({
         command: "agentExecutionFailed",
+
         text: message,
       });
 
       vscode.window.showErrorMessage(`Agent failed: ${message}`);
     } finally {
+      /*
+       * Do NOT clear _currentTask here.
+       *
+       * The task is needed after the planner finishes so
+       * Generate Changes can use it.
+       */
       this._agentAbortController = null;
     }
   }
@@ -719,7 +996,9 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async stopAgent(): Promise<void> {
-    if (!this.isAgentBusy()) { return; }
+    if (!this.isAgentBusy()) {
+      return;
+    }
     if (this._agentAbortController) {
       this._agentAbortController.abort();
       this._agentAbortController = null;

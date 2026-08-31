@@ -159,33 +159,20 @@ function buildPlannerPrompt(
   context: AgentContext,
 ): string {
   const sections: string[] = [];
+  const isDeleteRequest = /\b(?:remove|delete|erase)\b/i.test(instruction);
+  const isRenameRequest = /\brename\b/i.test(instruction);
+  const isEverywhereRequest = /\b(?:everywhere|all references|all usages|all occurrences)\b/i.test(instruction);
+  const isReplaceRequest = /\breplace\b/i.test(instruction);
 
-  /*
-   * ---------------------------------------------------------
-   * 1. USER REQUEST
-   * ---------------------------------------------------------
-   */
+  // 1. USER REQUEST
   sections.push(
     "================ USER REQUEST ================",
     instruction,
     "============== END USER REQUEST ==============",
   );
 
-  /*
-   * ---------------------------------------------------------
-   * 2. DETERMINE REQUEST SCOPE
-   * ---------------------------------------------------------
-   */
+  // 2. REQUEST ANALYSIS
   sections.push("", "================ REQUEST ANALYSIS =============");
-
-  const isRenameRequest = /\brename\b/i.test(instruction);
-
-  const isEverywhereRequest =
-    /\b(everywhere|all references|all usages|all occurrences)\b/i.test(
-      instruction,
-    );
-
-  const isReplaceRequest = /\breplace\b/i.test(instruction);
 
   if (isRenameRequest) {
     sections.push(
@@ -200,12 +187,19 @@ function buildPlannerPrompt(
       "4. Reference/import updates",
       "5. A combination of the above",
     );
+  } else if (isDeleteRequest) {
+    sections.push(
+      "REQUEST TYPE: DELETE",
+      "",
+      "This is a file/directory deletion request.",
+    );
   } else if (isReplaceRequest) {
     sections.push("REQUEST TYPE: REPLACE");
   } else {
     sections.push("REQUEST TYPE: GENERAL MODIFICATION");
   }
 
+  // REQUEST SCOPE
   if (isEverywhereRequest) {
     sections.push(
       "",
@@ -223,17 +217,13 @@ function buildPlannerPrompt(
     sections.push(
       "",
       "SCOPE: PROJECT",
-      "No active file is available. Determine the safest scope from the project context.",
+      "No active file is available. Determine the safest scope from the request and available project context.",
     );
   }
 
   sections.push("============== END REQUEST ANALYSIS ===========");
 
-  /*
-   * ---------------------------------------------------------
-   * 3. CURRENT FILE
-   * ---------------------------------------------------------
-   */
+  // 3. CURRENT FILE
   if (context.currentFile) {
     sections.push(
       "",
@@ -246,11 +236,7 @@ function buildPlannerPrompt(
     );
   }
 
-  /*
-   * ---------------------------------------------------------
-   * 4. RELATED FILES
-   * ---------------------------------------------------------
-   */
+  // 4. RELATED FILES
   if (context.relatedFiles && context.relatedFiles.length > 0) {
     sections.push("", "================ RELATED FILES ================");
 
@@ -268,19 +254,16 @@ function buildPlannerPrompt(
     sections.push("============== END RELATED FILES ==============");
   }
 
-  /*
-   * ---------------------------------------------------------
-   * 5. PROJECT-WIDE REFERENCES
-   * ---------------------------------------------------------
-   */
+  // 5. PROJECT-WIDE REFERENCES
   if (context.projectReferences && context.projectReferences.length > 0) {
     sections.push(
       "",
       "============= PROJECT-WIDE REFERENCES =========",
       `Found ${context.projectReferences.length} project reference(s).`,
       "",
-      "These are candidate files/locations affected by the request.",
-      "Do not automatically modify every reference; determine which ones are actually relevant.",
+      "These are candidate files/locations that may be affected by the request.",
+      "Do not automatically modify every reference.",
+      "Determine which references are actually relevant to the requested operation.",
       "",
     );
 
@@ -304,11 +287,7 @@ function buildPlannerPrompt(
     );
   }
 
-  /*
-   * ---------------------------------------------------------
-   * 6. PROJECT SUMMARY
-   * ---------------------------------------------------------
-   */
+  // 6. PROJECT SUMMARY
   if (context.projectSummary) {
     sections.push(
       "",
@@ -318,11 +297,7 @@ function buildPlannerPrompt(
     );
   }
 
-  /*
-   * ---------------------------------------------------------
-   * 7. KNOWLEDGE GRAPH CONTEXT
-   * ---------------------------------------------------------
-   */
+  // 7. KNOWLEDGE GRAPH CONTEXT
   if (context.graphContext) {
     sections.push(
       "",
@@ -359,15 +334,32 @@ function buildPlannerPrompt(
     );
   }
 
-  /*
-   * ---------------------------------------------------------
-   * 8. RENAME-SPECIFIC TASK CONTEXT
-   * ---------------------------------------------------------
-   *
-   * This is contextual information for THIS request.
-   * Permanent rename rules remain in buildSystemPrompt().
-   * ---------------------------------------------------------
-   */
+  // 8. DELETE-SPECIFIC TASK CONTEXT
+  if (isDeleteRequest) {
+    sections.push(
+      "",
+      "================ DELETE TASK =================",
+      "",
+      "This request asks to delete a file or directory.",
+      "",
+      "Deletion rules:",
+      "1. Identify the exact existing workspace path before creating the plan.",
+      "2. Do not guess between multiple files with the same filename.",
+      "3. If a filename matches multiple workspace paths, the intended file must be resolved explicitly.",
+      "4. An empty file is still a valid existing file.",
+      "5. File existence must be determined from the workspace path, not from file content.",
+      "6. Use operation 'delete' for an actual filesystem deletion.",
+      "7. Do not convert a delete request into a modify operation.",
+      "8. Do not generate replacement content for a delete operation.",
+      "9. Use the exact path selected or identified from the workspace.",
+      "10. If the extension host provides a RESOLVED DELETE TARGET, that path is authoritative.",
+      "11. Never select a different file when a resolved delete target is supplied.",
+      "",
+      "=============== END DELETE TASK ===============",
+    );
+  }
+
+  // 9. RENAME-SPECIFIC TASK CONTEXT
   if (isRenameRequest) {
     sections.push(
       "",
@@ -408,11 +400,7 @@ function buildPlannerPrompt(
     );
   }
 
-  /*
-   * ---------------------------------------------------------
-   * 9. PLANNING INSTRUCTIONS FOR THIS REQUEST
-   * ---------------------------------------------------------
-   */
+  // 10. PLANNING INSTRUCTIONS
   sections.push(
     "",
     "================ TASK INSTRUCTIONS ============",
@@ -422,14 +410,16 @@ function buildPlannerPrompt(
     "4. Use project-wide references for project-wide requests.",
     "5. Use graph relationships to understand dependencies and dependents.",
     "6. Prefer the smallest safe set of affected files.",
-    "7. targetFiles must include every file that will actually be modified or renamed.",
+    "7. targetFiles must include every file that will actually be modified, created, deleted, or renamed.",
     "8. Do not add unrelated files merely because they mention a similar name.",
     "9. Preserve tests when they are affected by the requested change.",
     "10. Do not include generated output, build output, dependency folders, or unrelated files.",
     "11. Plan only. Do not generate replacement file contents.",
     "12. Do not claim that changes have already been applied.",
     "13. Distinguish content modifications from filesystem operations.",
-    "14. For rename requests, identify the required rename and modification operations separately.",
+    "14. For delete requests, verify the exact target path and never guess when multiple files have the same filename.",
+    "15. An empty file is still a valid delete target.",
+    "16. For rename requests, identify filesystem rename operations separately from content/reference modifications.",
     "================================================",
   );
 

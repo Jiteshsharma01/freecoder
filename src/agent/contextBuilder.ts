@@ -7,6 +7,11 @@ import { KnowledgeGraph } from "../projectAnalysis/knowledgeGraph/types";
 
 import { AgentContext, FileContext, ProjectReference } from "./types";
 
+export interface FileCandidateResult {
+  requestedName: string;
+  matches: string[];
+}
+
 export async function buildAgentContext(
   rootPath: string,
   graph: KnowledgeGraph | null,
@@ -23,7 +28,11 @@ export async function buildAgentContext(
 
   const graphContext = buildGraphContext(currentFile, graph);
 
-  const projectReferences = await findProjectReferences(instruction, analysis, rootPath);
+  const projectReferences = await findProjectReferences(
+    instruction,
+    analysis,
+    rootPath,
+  );
 
   const projectSummary = buildProjectSummary(analysis, projectReferences);
 
@@ -234,18 +243,6 @@ async function findProjectReferences(
   return deduplicateReferences(references);
 }
 
-function containsIdentifier(line: string, identifier: string): boolean {
-  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-  const pattern = new RegExp(`\\b${escaped}\\b`);
-
-  return pattern.test(line);
-}
-
-function normalizeProjectPath(value: string): string {
-  return value.replace(/\\/g, "/").replace(/^\.\/+/, "");
-}
-
 function extractSearchTerms(instruction: string): string[] {
   const terms = new Set<string>();
 
@@ -328,4 +325,102 @@ function buildProjectSummary(
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\.\/+/, "");
+}
+
+function normalizeProjectPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.\/+/, "");
+}
+
+function extractDeleteFileName(instruction: string): string | null {
+  const match = instruction.match(
+    /\b(?:remove|delete|erase)\s+(?:the\s+)?file\s+[`"']?([^`"'\s\/\\]+)[`"']?/i,
+  );
+  if (match?.[1]) {
+    return match[1].trim();
+  }
+  const fallback = instruction.match(
+    /\b(?:remove|delete|erase)\s+[`"']?([^`"'\s\/\\]+)[`"']?/i,
+  );
+  return fallback?.[1]?.trim() ?? null;
+}
+
+function containsIdentifier(line: string, identifier: string): boolean {
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`\\b${escaped}\\b`);
+  return pattern.test(line);
+}
+
+function looksLikeExplicitPath(value: string): boolean {
+  return value.includes("/") || value.includes("\\");
+}
+
+async function findFileCandidatesByName(
+  rootPath: string,
+  fileName: string,
+  analysis: ProjectAnalysis,
+): Promise<string[]> {
+  const normalizedName = fileName.trim().toLowerCase();
+
+  if (!normalizedName) {
+    return [];
+  }
+
+  return analysis.files
+    .filter((file) => file.name.toLowerCase() === normalizedName)
+    .map((file) => normalizeProjectPath(file.path))
+    .filter((filePath, index, all) => all.indexOf(filePath) === index);
+}
+
+async function resolveDeleteCandidates(
+  instruction: string,
+  analysis: ProjectAnalysis,
+): Promise<FileCandidateResult | null> {
+  const requestedName = extractDeleteFileName(instruction);
+
+  if (!requestedName) {
+    return null;
+  }
+
+  /*
+   * If the user supplied a path such as:
+   *
+   * src/utils/testFile.tsx
+   *
+   * don't treat it as a filename search.
+   *
+   * Let the exact path be resolved directly.
+   */
+  if (looksLikeExplicitPath(requestedName)) {
+    const normalizedPath = normalizeProjectPath(requestedName);
+
+    const exactMatch = analysis.files.some(
+      (file) => normalizeProjectPath(file.path) === normalizedPath,
+    );
+
+    return {
+      requestedName,
+      matches: exactMatch ? [normalizedPath] : [],
+    };
+  }
+
+  /*
+   * Filename-only request.
+   *
+   * Example:
+   *
+   * Remove testFile.tsx
+   *
+   * Search every known project file with that name.
+   */
+  const normalizedName = requestedName.toLowerCase().trim();
+
+  const matches = analysis.files
+    .filter((file) => file.name.toLowerCase() === normalizedName)
+    .map((file) => normalizeProjectPath(file.path))
+    .filter((filePath, index, all) => all.indexOf(filePath) === index);
+
+  return {
+    requestedName,
+    matches,
+  };
 }

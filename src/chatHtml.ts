@@ -1150,7 +1150,6 @@ export function getChatHtml(webviewUri: string): string {
                         renderApplyButton();
                         break;
                     case "agentBusy":
-                        setAgentButtonBusy(true);
                         showAgentStatus("⚠️ " + message.text);
                         break;
                     case 'agentApplyingChanges':
