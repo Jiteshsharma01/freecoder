@@ -107,6 +107,7 @@ export function getChatHtml(webviewUri: string): string {
             let agentProgressDiv = null;
             let agentPlanDiv = null;
             let agentReviewDiv = null;
+            let normalChatBusy = false;
 
             // Track scrolling state explicitly
             let isUserScrolledUp = false; 
@@ -224,6 +225,7 @@ export function getChatHtml(webviewUri: string): string {
 
             // Handle Stop Button Click
             document.getElementById('stop-btn').addEventListener('click', () => {
+                normalChatBusy = false;
                 vscode.postMessage({ command: 'stopGeneration' });
                 resetUIState();
                 if (currentStreamDiv) {
@@ -237,6 +239,7 @@ export function getChatHtml(webviewUri: string): string {
                 document.getElementById('stop-btn').style.display = 'none';
                 document.getElementById('user-input').disabled = false;
                 document.getElementById('provider').disabled = false;
+                normalChatBusy = false;
                 // Clean up any loose embedded loader nodes
                 const activeLoader = document.getElementById('ai-embedded-loader');
                 if (activeLoader) activeLoader.remove();
@@ -386,6 +389,10 @@ export function getChatHtml(webviewUri: string): string {
             });
 
             document.getElementById('agent-btn').addEventListener('click', () => {
+                if (normalChatBusy) {
+                    showAgentStatus('⚠️ Stop the current AI generation before starting an Agent task.');
+                    return;
+                }
                 var userInputEl = document.getElementById('user-input');
                 var text = userInputEl.value.trim();
                 if (!text) { return; }
@@ -420,6 +427,7 @@ export function getChatHtml(webviewUri: string): string {
                 const provider = document.getElementById('provider').value;
                 if (!text && !base64Attachment) return;
 
+                normalChatBusy = true;
                 // Lock out alternative input configurations while streaming is active
                 document.getElementById('send-btn').style.display = 'none';
                 document.getElementById('stop-btn').style.display = 'block';
@@ -499,6 +507,12 @@ export function getChatHtml(webviewUri: string): string {
                     plan.changes.forEach(function(change) {
                         var operationLabel = safeEscape(change.operation || 'modify');
                         var explanation = safeEscape(change.explanation || 'No explanation provided.');
+                        var pathDisplay = change.operation === 'rename'
+                            ? (safeEscape(change.originalPath || change.path) +
+                                ' → ' +
+                                safeEscape(change.newPath || change.path)
+                            )
+                            : safeEscape(change.path);
                         changesHtml +=
                             '<div style="' +
                                 'padding: 8px;' +
@@ -512,9 +526,7 @@ export function getChatHtml(webviewUri: string): string {
                                     'font-weight: 600;' +
                                     'word-break: break-word;' +
                                 '">' +
-                                    safeEscape(
-                                        change.path
-                                    ) +
+                                    pathDisplay +
                                 '</div>' +
 
                                 '<div style="' +
@@ -1038,6 +1050,21 @@ export function getChatHtml(webviewUri: string): string {
                 agentReviewDiv = null;
             }
 
+            function setAgentButtonBusy(busy) {
+                var agentButton = document.getElementById('agent-btn');
+                var sendButton = document.getElementById('send-btn');
+                if (agentButton) {
+                    agentButton.disabled = busy;
+                    agentButton.style.opacity = busy ? '0.5' : '1';
+                    agentButton.style.cursor = busy ? 'not-allowed' : 'pointer';
+                }
+                if (sendButton) {
+                    sendButton.disabled = busy || normalChatBusy;
+                    sendButton.style.opacity = (busy ||normalChatBusy) ? '0.5' : '1';
+                    sendButton.style.cursor = (busy ||normalChatBusy) ? 'not-allowed' : 'pointer';
+                }
+            }
+
             // Stream Receiver Event Listener Loop
             window.addEventListener('message', event => {
                 const message = event.data;
@@ -1101,6 +1128,7 @@ export function getChatHtml(webviewUri: string): string {
                         break;
                     
                     case "agentProgress":
+                        setAgentButtonBusy(true);
                         updateAgentProgress(message.stage, message.text);
                         break;
 
@@ -1121,11 +1149,13 @@ export function getChatHtml(webviewUri: string): string {
                         updateAgentProgress('diffApproval', 'Review the diff before applying changes.');
                         renderApplyButton();
                         break;
-
+                    case "agentBusy":
+                        setAgentButtonBusy(true);
+                        showAgentStatus("⚠️ " + message.text);
+                        break;
                     case 'agentApplyingChanges':
                         updateAgentProgress('applying', 'Applying approved changes...');
                         break;
-
                     case "agentPlanAccepted":
                         if (agentPlanDiv) {
                             agentPlanDiv.remove();
@@ -1134,6 +1164,7 @@ export function getChatHtml(webviewUri: string): string {
                         break;
 
                     case 'agentExecutionCompleted':
+                        setAgentButtonBusy(false);
                         if (agentPlanDiv) {
                             agentPlanDiv.remove();
                             agentPlanDiv = null;
@@ -1146,6 +1177,7 @@ export function getChatHtml(webviewUri: string): string {
                         break;
 
                     case 'agentExecutionCancelled':
+                        setAgentButtonBusy(false);
                         if (agentPlanDiv) {
                             agentPlanDiv.remove();
                             agentPlanDiv = null;
@@ -1158,20 +1190,24 @@ export function getChatHtml(webviewUri: string): string {
                         break;
 
                     case 'agentExecutionFailed':
+                        setAgentButtonBusy(false);
                         showAgentStatus('❌ ' + message.text);
                         break;
 
                     case 'endStream':
+                        normalChatBusy = false;
                         resetUIState();
                         break;
 
                     case 'showError':
+                        normalChatBusy = false;
                         resetUIState();
                         chatLog.innerHTML += '<div style="color: var(--vscode-errorForeground);">❌ ' + message.text + '</div>';
                         if (!isUserScrolledUp) scrollToBottom();
                         break;
                         
                     case 'receiveResponse':
+                        normalChatBusy = false;
                         resetUIState();
                         chatLog.innerHTML += '<div><b>AI:</b> ' + formatMarkdownStream(message.text) + '</div>';
                         attachAllCopyListeners();

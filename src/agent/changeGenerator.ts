@@ -5,11 +5,10 @@ import { AgentTask, FileChange } from "./types";
 
 interface AIFileChange {
   path: string;
-
-  operation: "create" | "modify" | "delete";
-
+  operation: "create" | "modify" | "delete" | "rename";
+  originalPath?: string;
+  newPath?: string;
   content?: string;
-
   reason?: string;
 }
 
@@ -24,7 +23,7 @@ const OLLAMA_MODEL = "qwen3-coder:30b";
 export async function generateFileChanges(
   task: AgentTask,
   rootPath: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<FileChange[]> {
   if (task.targetFiles.length === 0) {
     throw new Error("The agent plan does not contain any target files.");
@@ -91,7 +90,41 @@ async function readTargetFiles(
 ): Promise<CurrentFile[]> {
   const results: CurrentFile[] = [];
 
+  /*
+   * Use a Set so rename operations do not cause
+   * the same file to be read multiple times.
+   */
+  const pathsToRead = new Set<string>();
+
+  /*
+   * Normal target files from the approved plan.
+   */
   for (const relativePath of task.targetFiles) {
+    pathsToRead.add(normalizePath(relativePath));
+  }
+
+  /*
+   * Rename operations need both paths available
+   * to the change generator/validator:
+   *
+   * originalPath = existing source file
+   * newPath      = destination
+   */
+  for (const change of task.changes) {
+    if (change.operation !== "rename") {
+      continue;
+    }
+
+    if (change.originalPath) {
+      pathsToRead.add(normalizePath(change.originalPath));
+    }
+
+    if (change.newPath) {
+      pathsToRead.add(normalizePath(change.newPath));
+    }
+  }
+
+  for (const relativePath of pathsToRead) {
     const absolutePath = resolveSafePath(rootPath, relativePath);
 
     try {
@@ -103,6 +136,13 @@ async function readTargetFiles(
         content,
       });
     } catch (error: any) {
+      /*
+       * ENOENT means the path does not currently exist.
+       *
+       * This is expected for:
+       * - create targets
+       * - rename destinations
+       */
       if (error?.code === "ENOENT") {
         results.push({
           path: relativePath,
@@ -277,66 +317,262 @@ function validateGeneratedChanges(
   for (const generatedChange of generated) {
     const normalizedPath = normalizePath(generatedChange.path);
 
-    if (!allowedPaths.has(normalizedPath)) {
-      throw new Error(
-        `AI attempted to modify an unapproved file: ${generatedChange.path}`,
-      );
-    }
+    /*
+     * =========================================================
+     * RENAME
+     * =========================================================
+     *
+     * For rename:
+     *
+     * originalPath = existing source
+     * newPath      = destination
+     * path         = destination/new path
+     *
+     * We intentionally handle rename BEFORE the normal
+     * current-file lookup because the destination does not
+     * normally exist yet.
+     * =========================================================
+     */
+    if (generatedChange.operation === "rename") {
+      if (!generatedChange.originalPath || !generatedChange.newPath) {
+        throw new Error(
+          `Rename operation for "${generatedChange.path}" requires both originalPath and newPath.`,
+        );
+      }
 
-    const current = currentFileMap.get(normalizedPath);
+      const normalizedOriginal = normalizePath(generatedChange.originalPath);
 
-    if (!current) {
-      throw new Error(
-        `Unable to validate generated file: ${generatedChange.path}`,
-      );
-    }
+      const normalizedNew = normalizePath(generatedChange.newPath);
 
-    if (generatedChange.operation === "delete") {
+      /*
+       * Source and destination must be different.
+       */
+      if (normalizedOriginal === normalizedNew) {
+        throw new Error(
+          `Rename source and destination cannot be identical: ${generatedChange.originalPath}`,
+        );
+      }
+
+      /*
+       * Both paths are affected by a rename.
+       *
+       * The original path must be approved because the
+       * Agent is changing that existing file's identity.
+       *
+       * The new path must also be approved because the Agent
+       * is creating that destination path.
+       */
+      if (!allowedPaths.has(normalizedOriginal)) {
+        throw new Error(
+          `AI attempted to rename an unapproved source file: ${generatedChange.originalPath}`,
+        );
+      }
+
+      if (!allowedPaths.has(normalizedNew)) {
+        throw new Error(
+          `AI attempted to rename to an unapproved destination: ${generatedChange.newPath}`,
+        );
+      }
+
+      /*
+       * Existing source MUST exist.
+       */
+      const originalFile = currentFileMap.get(normalizedOriginal);
+
+      if (!originalFile || !originalFile.exists) {
+        throw new Error(
+          `File to rename does not exist: ${generatedChange.originalPath}`,
+        );
+      }
+
+      /*
+       * Destination MUST NOT exist.
+       */
+      const destinationFile = currentFileMap.get(normalizedNew);
+
+      if (destinationFile?.exists) {
+        throw new Error(
+          `Rename destination already exists: ${generatedChange.newPath}`,
+        );
+      }
+
+      /*
+       * Pure rename must not contain generated content.
+       *
+       * This is an extra safety check so the model cannot
+       * accidentally treat rename as a content replacement.
+       */
+      if (generatedChange.content !== undefined) {
+        throw new Error(
+          `Rename operation must not contain file content: ${generatedChange.path}`,
+        );
+      }
+
       results.push({
-        path: generatedChange.path,
-        operation: "delete",
-        originalContent: current.content,
+        path: normalizedNew,
+
+        operation: "rename",
+
+        originalPath: normalizedOriginal,
+
+        newPath: normalizedNew,
+
+        originalContent: originalFile.content,
+
         explanation: generatedChange.reason,
       });
 
       continue;
     }
 
-    if (typeof generatedChange.content !== "string") {
+    /*
+     * =========================================================
+     * CREATE
+     * =========================================================
+     */
+    if (generatedChange.operation === "create") {
+      if (!allowedPaths.has(normalizedPath)) {
+        throw new Error(
+          `AI attempted to create an unapproved file: ${generatedChange.path}`,
+        );
+      }
+
+      const current = currentFileMap.get(normalizedPath);
+
+      /*
+       * If the file exists, creating it would overwrite an
+       * existing workspace file.
+       */
+      if (current?.exists) {
+        throw new Error(
+          `AI requested creation of a file that already exists: ${generatedChange.path}`,
+        );
+      }
+
+      /*
+       * A create operation MUST have complete content.
+       */
+      if (typeof generatedChange.content !== "string") {
+        throw new Error(
+          `AI did not return complete content for new file ${generatedChange.path}`,
+        );
+      }
+
+      results.push({
+        path: normalizedPath,
+
+        operation: "create",
+
+        originalContent: undefined,
+
+        newContent: generatedChange.content,
+
+        explanation: generatedChange.reason,
+      });
+
+      continue;
+    }
+
+    /*
+     * =========================================================
+     * MODIFY / DELETE
+     * =========================================================
+     */
+    if (!allowedPaths.has(normalizedPath)) {
       throw new Error(
-        `AI did not return complete content for ${generatedChange.path}`,
+        `AI attempted to modify an unapproved file: ${generatedChange.path}`,
       );
     }
 
-    if (generatedChange.operation === "modify" && !current.exists) {
+    /*
+     * Both modify and delete require an existing file.
+     */
+    const current = currentFileMap.get(normalizedPath);
+
+    if (!current || !current.exists) {
       throw new Error(
-        `AI requested modification of a file that does not exist: ${generatedChange.path}`,
+        `Unable to validate generated file: ${generatedChange.path}`,
       );
     }
 
-    if (generatedChange.operation === "create" && current.exists) {
-      throw new Error(
-        `AI requested creation of a file that already exists: ${generatedChange.path}`,
-      );
+    /*
+     * =========================================================
+     * DELETE
+     * =========================================================
+     */
+    if (generatedChange.operation === "delete") {
+      /*
+       * Delete must not contain new content.
+       */
+      if (generatedChange.content !== undefined) {
+        throw new Error(
+          `Delete operation must not contain file content: ${generatedChange.path}`,
+        );
+      }
+
+      results.push({
+        path: normalizedPath,
+
+        operation: "delete",
+
+        /*
+         * Keep the snapshot so the apply stage can verify
+         * the file hasn't changed since the Agent inspected it.
+         */
+        originalContent: current.content,
+
+        explanation: generatedChange.reason,
+      });
+
+      continue;
     }
 
-    results.push({
-      path: generatedChange.path,
+    /*
+     * =========================================================
+     * MODIFY
+     * =========================================================
+     */
+    if (generatedChange.operation === "modify") {
+      /*
+       * Modify MUST contain complete resulting content.
+       */
+      if (typeof generatedChange.content !== "string") {
+        throw new Error(
+          `AI did not return complete content for ${generatedChange.path}`,
+        );
+      }
 
-      operation: generatedChange.operation,
+      results.push({
+        path: normalizedPath,
 
-      originalContent: current.content,
+        operation: "modify",
 
-      newContent: generatedChange.content,
+        originalContent: current.content,
 
-      explanation: generatedChange.reason,
-    });
+        newContent: generatedChange.content,
+
+        explanation: generatedChange.reason,
+      });
+
+      continue;
+    }
+
+    /*
+     * =========================================================
+     * UNKNOWN OPERATION
+     * =========================================================
+     */
+    throw new Error(
+      `Unsupported AI file operation: ${generatedChange.operation}`,
+    );
   }
 
+  /*
+   * The AI must produce at least one usable operation.
+   */
   if (results.length === 0) {
     throw new Error("The AI did not generate any valid file changes.");
   }
-
   return results;
 }
 

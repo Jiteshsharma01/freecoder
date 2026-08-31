@@ -16,8 +16,20 @@ import { runAgentTask } from "./agent/agent";
 import { generateFileChanges } from "./agent/changeGenerator";
 import { closeAgentDiffs, showAgentDiffs } from "./agent/diffPreview";
 import { applyFileChanges } from "./agent/applyChanges";
+import {
+  FREECOPILOT_DIFF_SCHEME,
+  FreeCopilotDiffProvider,
+} from "./agent/virtualDiffProvider";
 
 export function activate(context: vscode.ExtensionContext) {
+  const diffProvider = new FreeCopilotDiffProvider();
+
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(
+      FREECOPILOT_DIFF_SCHEME,
+      diffProvider,
+    ),
+  );
   // Register Workspace Map Core Action Command
   const mapCmd = vscode.commands.registerCommand(
     "freeCopilot.generateProjectMap",
@@ -69,7 +81,10 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(mapCmd, graphCmd);
 
   // Register Webview View Sidebar Provider Container interface
-  const chatProvider = new FreeCopilotViewProvider(context.extensionUri);
+  const chatProvider = new FreeCopilotViewProvider(
+    context.extensionUri,
+    diffProvider,
+  );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       "freeCopilot.chatView",
@@ -91,7 +106,10 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   private _webviewView: vscode.WebviewView | undefined;
   private _currentTask: AgentTask | undefined;
 
-  constructor(private readonly _extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly _extensionUri: vscode.Uri,
+    private readonly _diffProvider: FreeCopilotDiffProvider,
+  ) {}
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -109,11 +127,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
     // Intercept incoming interface pipeline events
     webviewView.webview.onDidReceiveMessage(async (data) => {
-      console.log(
-            "FreeCopilot WebView message:",
-            data.command,
-            data
-        );
+      console.log("FreeCopilot WebView message:", data.command, data);
       switch (data.command) {
         case "generateMap": {
           const rootPath = getWorkspaceRoot();
@@ -150,10 +164,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "agentRequest": {
-          console.log(
-              "AGENT REQUEST CASE HIT:",
-              data.message
-          );
+          console.log("AGENT REQUEST CASE HIT:", data.message);
           const instruction =
             typeof data.message === "string" ? data.message.trim() : "";
           if (!instruction) {
@@ -208,7 +219,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       vscode.window.showWarningMessage("There is no pending agent task.");
       return;
     }
-    if (this._currentTask.status !== "review") {
+    if (!this._currentTask || this._currentTask.status !== "review") {
       return;
     }
 
@@ -221,7 +232,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     try {
       this._agentAbortController = new AbortController();
       this._currentTask.status = "generating";
-      this._webviewView?.webview.postMessage({command: "agentPlanAccepted"});
+      this._webviewView?.webview.postMessage({ command: "agentPlanAccepted" });
 
       // this._webviewView?.show(true);
 
@@ -232,7 +243,11 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         text: "Generating the actual file changes...",
       });
 
-      const changes = await generateFileChanges(this._currentTask, rootPath, this._agentAbortController.signal);
+      const changes = await generateFileChanges(
+        this._currentTask,
+        rootPath,
+        this._agentAbortController.signal,
+      );
 
       if (this._agentAbortController.signal.aborted) {
         return;
@@ -249,7 +264,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         text: "Opening the proposed changes in VS Code...",
       });
 
-      await showAgentDiffs(rootPath, changes);
+      await showAgentDiffs(rootPath, changes, this._diffProvider);
 
       if (this._agentAbortController.signal.aborted) {
         return;
@@ -264,19 +279,20 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
       this._webviewView?.webview.postMessage({
         command: "agentAwaitingApply",
-        changes: changes.map(function(change) {
+        changes: changes.map(function (change) {
           return {
             path: change.path,
             operation: change.operation,
-            explanation: change.explanation
+            explanation: change.explanation,
           };
-        })
+        }),
       });
     } catch (error: any) {
       if (error && error?.name === "AbortError") {
         return;
       }
-      const message = error?.message ?? "Unknown error while generating changes.";
+      const message =
+        error?.message ?? "Unknown error while generating changes.";
 
       if (this._currentTask) {
         this._currentTask.status = "failed";
@@ -386,11 +402,14 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async cancelAgentTask(): Promise<void> {
-    if (!this._currentTask) {
-      return;
+    if (this._agentAbortController) {
+      this._agentAbortController.abort();
+      this._agentAbortController = null;
     }
-    this._currentTask.status = "cancelled";
     await closeAgentDiffs();
+    if (this._currentTask) {
+      this._currentTask.status = "cancelled";
+    }
     this._currentTask = undefined;
     this._webviewView?.webview.postMessage({
       command: "agentExecutionCancelled",
@@ -572,6 +591,18 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleAgentRequest(instruction: string): Promise<void> {
+    if (this.isAgentBusy()) {
+      vscode.window.showWarningMessage(
+        "A FreeCopilot Agent task is already in progress. Complete or cancel it before starting another Agent task.",
+      );
+
+      this._webviewView?.webview.postMessage({
+        command: "agentBusy",
+        text: "An Agent task is already running. Complete or cancel it before starting another one.",
+      });
+
+      return;
+    }
     const rootPath = getWorkspaceRoot();
 
     if (!rootPath) {
@@ -617,7 +648,13 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         text: "Creating the agent plan...",
       });
 
-      const task = await runAgentTask(instruction, rootPath, graph, analysis, this._agentAbortController.signal);
+      const task = await runAgentTask(
+        instruction,
+        rootPath,
+        graph,
+        analysis,
+        this._agentAbortController.signal,
+      );
 
       if (this._agentAbortController.signal.aborted) {
         return;
@@ -667,7 +704,22 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private stopAgent(): void {
+  private isAgentBusy(): boolean {
+    if (!this._currentTask) {
+      return false;
+    }
+
+    return (
+      this._currentTask.status === "planning" ||
+      this._currentTask.status === "review" ||
+      this._currentTask.status === "generating" ||
+      this._currentTask.status === "diff" ||
+      this._currentTask.status === "applying"
+    );
+  }
+
+  private async stopAgent(): Promise<void> {
+    if (!this.isAgentBusy()) { return; }
     if (this._agentAbortController) {
       this._agentAbortController.abort();
       this._agentAbortController = null;
@@ -675,7 +727,12 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     if (this._currentTask) {
       this._currentTask.status = "cancelled";
     }
-    this._webviewView?.webview.postMessage({command: "agentExecutionCancelled"});
+    await closeAgentDiffs();
+    this._currentTask = undefined;
+    this._webviewView?.webview.postMessage({
+      command: "agentExecutionCancelled",
+    });
+    vscode.window.showInformationMessage("FreeCopilot Agent stopped.");
   }
 }
 

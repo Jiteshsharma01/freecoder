@@ -48,7 +48,9 @@ export interface GraphContext {
 
 export interface FileChange {
   path: string;
-  operation: "create" | "modify" | "delete";
+  operation: "create" | "modify" | "delete" | "rename";
+  originalPath?: string;
+  newPath?: string;
   /**
    * Content of the file before the proposed change.
    * Used to protect against the file changing

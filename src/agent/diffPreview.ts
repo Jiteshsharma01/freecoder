@@ -3,82 +3,102 @@ import * as path from "path";
 
 import { FileChange } from "./types";
 
+import { FreeCopilotDiffProvider, createDiffUri } from "./virtualDiffProvider";
+
 const agentDiffResources = new Set<string>();
 
 export async function showAgentDiffs(
   rootPath: string,
   changes: FileChange[],
+  diffProvider: FreeCopilotDiffProvider,
 ): Promise<void> {
-  if (!changes.length) {
+  if (changes.length === 0) {
     throw new Error("There are no changes to preview.");
   }
 
   for (const change of changes) {
-    await showSingleDiff(rootPath, change);
+    await showSingleDiff(rootPath, change, diffProvider);
   }
 }
 
 async function showSingleDiff(
   rootPath: string,
   change: FileChange,
+  diffProvider: FreeCopilotDiffProvider,
 ): Promise<void> {
-  const filePath = resolveSafePath(rootPath, change.path);
+  const absolutePath = resolveSafePath(rootPath, change.path);
 
-  const language = detectLanguage(change.path);
+  const originalUri = vscode.Uri.file(absolutePath);
 
-  let originalUri: vscode.Uri;
-  let proposedUri: vscode.Uri;
+  let leftUri: vscode.Uri;
 
-  if (change.operation === "create") {
-    const proposedDocument = await vscode.workspace.openTextDocument({
-      content: change.newContent ?? "",
-      language,
-    });
+  let rightUri: vscode.Uri;
 
-    const emptyDocument = await vscode.workspace.openTextDocument({
-      content: "",
-      language,
-    });
+  /*
+   * MODIFY
+   *
+   * Real file on the left.
+   * Read-only virtual proposed file on the right.
+   */
+  if (change.operation === "modify") {
+    leftUri = originalUri;
 
-    originalUri = emptyDocument.uri;
+    rightUri = createDiffUri(change.path, "proposed");
 
-    proposedUri = proposedDocument.uri;
+    diffProvider.setDocument(rightUri, change.newContent ?? "", change.path);
+  } else if (change.operation === "create") {
+
+  /*
+   * CREATE
+   *
+   * Empty virtual document on the left.
+   * Read-only virtual proposed document on the right.
+   */
+    leftUri = createDiffUri(change.path, "empty");
+
+    rightUri = createDiffUri(change.path, "proposed");
+
+    diffProvider.setDocument(leftUri, "", change.path);
+
+    diffProvider.setDocument(rightUri, change.newContent ?? "", change.path);
   } else if (change.operation === "delete") {
-    const originalDocument = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(filePath),
-    );
 
-    const emptyDocument = await vscode.workspace.openTextDocument({
-      content: "",
-      language,
-    });
+  /*
+   * DELETE
+   *
+   * Real file on the left.
+   * Empty virtual document on the right.
+   */
+    leftUri = originalUri;
 
-    originalUri = originalDocument.uri;
+    rightUri = createDiffUri(change.path, "empty");
 
-    proposedUri = emptyDocument.uri;
+    diffProvider.setDocument(rightUri, "", change.path);
   } else {
-    const originalDocument = await vscode.workspace.openTextDocument(
-      vscode.Uri.file(filePath),
-    );
-
-    const proposedDocument = await vscode.workspace.openTextDocument({
-      content: change.newContent ?? "",
-      language: originalDocument.languageId,
-    });
-
-    originalUri = originalDocument.uri;
-
-    proposedUri = proposedDocument.uri;
+    throw new Error(`Unsupported Agent change operation: ${change.operation}`);
   }
 
-  agentDiffResources.add(originalUri.toString());
+  /*
+   * Track every virtual resource belonging
+   * to this Agent diff.
+   */
+  if (leftUri.scheme === "freecopilot-diff") {
+    agentDiffResources.add(leftUri.toString());
+  }
 
-  agentDiffResources.add(proposedUri.toString());
+  if (rightUri.scheme === "freecopilot-diff") {
+    agentDiffResources.add(rightUri.toString());
+  }
 
+  /*
+   * Open the actual VS Code diff.
+   *
+   * This is the known-good command shape.
+   */
   await vscode.commands.executeCommand(
     "vscode.diff",
-    originalUri,
-    proposedUri,
+    leftUri,
+    rightUri,
     buildDiffTitle(change),
     {
       viewColumn: vscode.ViewColumn.Beside,
@@ -124,11 +144,14 @@ export async function closeAgentDiffs(): Promise<void> {
     try {
       await vscode.window.tabGroups.close(tab, true);
     } catch {
-      // Ignore tabs that were
-      // already closed.
+      // Ignore tabs that were already closed.
     }
   }
 
+  agentDiffResources.clear();
+}
+
+export function clearAgentDiffResources(): void {
   agentDiffResources.clear();
 }
 
@@ -140,30 +163,12 @@ function buildDiffTitle(change: FileChange): string {
     case "delete":
       return `FreeCopilot: Delete ${change.path}`;
 
-    default:
+    case "modify":
       return `FreeCopilot: Modify ${change.path}`;
+
+    default:
+      return `FreeCopilot: ${change.path}`;
   }
-}
-
-function detectLanguage(filePath: string): string {
-  const extension = path.extname(filePath).toLowerCase();
-
-  const languages: Record<string, string> = {
-    ".ts": "typescript",
-    ".tsx": "typescriptreact",
-    ".js": "javascript",
-    ".jsx": "javascriptreact",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".json": "json",
-    ".css": "css",
-    ".scss": "scss",
-    ".html": "html",
-    ".md": "markdown",
-    ".php": "php",
-  };
-
-  return languages[extension] ?? "plaintext";
 }
 
 function resolveSafePath(rootPath: string, relativePath: string): string {

@@ -9,7 +9,9 @@ export interface AgentPlan {
 
 export interface PlannedChange {
   path: string;
-  operation: "create" | "modify" | "delete";
+  operation: "create" | "modify" | "delete" | "rename";
+  originalPath?: string;
+  newPath?: string;
   reason: string;
 }
 
@@ -19,7 +21,7 @@ const OLLAMA_MODEL = "qwen3-coder:30b";
 export async function generateAgentPlan(
   instruction: string,
   context: AgentContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<AgentPlan> {
   const prompt = buildPlannerPrompt(instruction, context);
 
@@ -64,8 +66,9 @@ export async function generateAgentPlan(
   const parsedPlan = parseAgentPlan(rawContent);
 
   const normalizedPlan = normalizeAgentPlan(parsedPlan, context);
+  const validatedPlan = validateAgentPlan(normalizedPlan);
 
-  if (normalizedPlan.targetFiles.length === 0) {
+  if (validatedPlan.targetFiles.length === 0) {
     throw new Error(
       [
         "The agent could not determine any target files.",
@@ -93,6 +96,32 @@ function buildSystemPrompt(): string {
     "Do not use markdown.",
     "Do not wrap the JSON in ``` fences.",
     "",
+    "GENERAL PLANNING RULES:",
+    "1. Use the smallest safe set of files necessary.",
+    "2. targetFiles must contain every file that should be changed.",
+    "3. Do not include unrelated files.",
+    "4. Preserve tests when they are relevant.",
+    "5. Do not modify generated files, build output, or dependency folders.",
+    "",
+    "RENAME RULES:",
+    "1. Determine whether the request is a symbol rename, file rename, directory rename, or a combination.",
+    "2. Use operation 'rename' for actual filesystem renames.",
+    "3. Use modify operations for references and imports that must change.",
+    "4. Do not simulate a file rename by only changing file contents.",
+    "5. For rename operations, originalPath is the existing workspace path.",
+    "6. For rename operations, newPath is the desired workspace path.",
+    "7. Do not provide content for a pure rename operation.",
+    "8. Only provide content when a file is also being modified.",
+    "",
+    "RENAME EXAMPLE:",
+    "If the user says 'Rename TodoList to TodoCollection everywhere',",
+    "the plan may require:",
+    "- rename the TodoList file",
+    "- rename a TodoList test file",
+    "- modify imports",
+    "- modify JSX/component references",
+    "- modify other project references",
+    "",
     "The JSON must have exactly this structure:",
     "",
     "{",
@@ -108,13 +137,20 @@ function buildSystemPrompt(): string {
     "  ]",
     "}",
     "",
-    "operation must be one of:",
-    "create, modify, delete",
+    "Allowed operations:",
+    "create, modify, delete, rename",
+    "",
+    "For rename operations, use:",
+    "{",
+    '  "path": "new/path/file.ts",',
+    '  "operation": "rename",',
+    '  "originalPath": "old/path/file.ts",',
+    '  "newPath": "new/path/file.ts",',
+    '  "reason": "why the file is renamed"',
+    "}",
     "",
     "Only include files that are actually relevant",
     "to the requested task.",
-    "",
-    "Prefer the smallest safe set of files.",
   ].join("\n");
 }
 
@@ -124,23 +160,80 @@ function buildPlannerPrompt(
 ): string {
   const sections: string[] = [];
 
-  sections.push("USER REQUEST:", instruction);
+  /*
+   * ---------------------------------------------------------
+   * 1. USER REQUEST
+   * ---------------------------------------------------------
+   */
+  sections.push(
+    "================ USER REQUEST ================",
+    instruction,
+    "============== END USER REQUEST ==============",
+  );
 
-  sections.push("", "TASK SCOPE:");
+  /*
+   * ---------------------------------------------------------
+   * 2. DETERMINE REQUEST SCOPE
+   * ---------------------------------------------------------
+   */
+  sections.push("", "================ REQUEST ANALYSIS =============");
 
-  if (context.projectReferences && context.projectReferences.length > 0) {
+  const isRenameRequest = /\brename\b/i.test(instruction);
+
+  const isEverywhereRequest =
+    /\b(everywhere|all references|all usages|all occurrences)\b/i.test(
+      instruction,
+    );
+
+  const isReplaceRequest = /\breplace\b/i.test(instruction);
+
+  if (isRenameRequest) {
     sections.push(
-      "The request appears to involve project-wide references.",
-      "Review PROJECT-WIDE REFERENCES carefully before choosing target files.",
+      "REQUEST TYPE: RENAME",
+      "",
+      "This is a rename request.",
+      "",
+      "Determine which kinds of changes are required:",
+      "1. Symbol rename",
+      "2. File rename",
+      "3. Directory rename",
+      "4. Reference/import updates",
+      "5. A combination of the above",
+    );
+  } else if (isReplaceRequest) {
+    sections.push("REQUEST TYPE: REPLACE");
+  } else {
+    sections.push("REQUEST TYPE: GENERAL MODIFICATION");
+  }
+
+  if (isEverywhereRequest) {
+    sections.push(
+      "",
+      "SCOPE: PROJECT-WIDE",
+      "The user explicitly requested a project-wide operation.",
+      "All relevant references must be considered before selecting target files.",
     );
   } else if (context.currentFile) {
-    sections.push("The request is currently associated with the active file.");
+    sections.push(
+      "",
+      "SCOPE: ACTIVE FILE / RELATED FILES",
+      `The request is currently associated with: ${context.currentFile.path}`,
+    );
   } else {
     sections.push(
-      "No active file is available. Determine the scope from the request and available project context.",
+      "",
+      "SCOPE: PROJECT",
+      "No active file is available. Determine the safest scope from the project context.",
     );
   }
 
+  sections.push("============== END REQUEST ANALYSIS ===========");
+
+  /*
+   * ---------------------------------------------------------
+   * 3. CURRENT FILE
+   * ---------------------------------------------------------
+   */
   if (context.currentFile) {
     sections.push(
       "",
@@ -153,6 +246,11 @@ function buildPlannerPrompt(
     );
   }
 
+  /*
+   * ---------------------------------------------------------
+   * 4. RELATED FILES
+   * ---------------------------------------------------------
+   */
   if (context.relatedFiles && context.relatedFiles.length > 0) {
     sections.push("", "================ RELATED FILES ================");
 
@@ -170,8 +268,21 @@ function buildPlannerPrompt(
     sections.push("============== END RELATED FILES ==============");
   }
 
+  /*
+   * ---------------------------------------------------------
+   * 5. PROJECT-WIDE REFERENCES
+   * ---------------------------------------------------------
+   */
   if (context.projectReferences && context.projectReferences.length > 0) {
-    sections.push("", "============= PROJECT-WIDE REFERENCES =========");
+    sections.push(
+      "",
+      "============= PROJECT-WIDE REFERENCES =========",
+      `Found ${context.projectReferences.length} project reference(s).`,
+      "",
+      "These are candidate files/locations affected by the request.",
+      "Do not automatically modify every reference; determine which ones are actually relevant.",
+      "",
+    );
 
     for (const reference of context.projectReferences) {
       sections.push(
@@ -183,8 +294,21 @@ function buildPlannerPrompt(
     }
 
     sections.push("=========== END PROJECT-WIDE REFERENCES =======");
+  } else {
+    sections.push(
+      "",
+      "============= PROJECT-WIDE REFERENCES =========",
+      "No project-wide references were found by the reference scanner.",
+      "Do not assume that there are no references; use the available file and graph context.",
+      "=========== END PROJECT-WIDE REFERENCES =======",
+    );
   }
 
+  /*
+   * ---------------------------------------------------------
+   * 6. PROJECT SUMMARY
+   * ---------------------------------------------------------
+   */
   if (context.projectSummary) {
     sections.push(
       "",
@@ -194,10 +318,18 @@ function buildPlannerPrompt(
     );
   }
 
+  /*
+   * ---------------------------------------------------------
+   * 7. KNOWLEDGE GRAPH CONTEXT
+   * ---------------------------------------------------------
+   */
   if (context.graphContext) {
-    sections.push("", "================ GRAPH CONTEXT ================");
-
-    sections.push("DIRECT DEPENDENCIES:");
+    sections.push(
+      "",
+      "================ GRAPH CONTEXT ================",
+      "",
+      "DIRECT DEPENDENCIES:",
+    );
 
     if (context.graphContext.dependencies.length > 0) {
       sections.push(
@@ -218,19 +350,86 @@ function buildPlannerPrompt(
     }
 
     sections.push("============== END GRAPH CONTEXT ==============");
+  } else {
+    sections.push(
+      "",
+      "================ GRAPH CONTEXT ================",
+      "No knowledge graph context is available.",
+      "============== END GRAPH CONTEXT ==============",
+    );
   }
 
+  /*
+   * ---------------------------------------------------------
+   * 8. RENAME-SPECIFIC TASK CONTEXT
+   * ---------------------------------------------------------
+   *
+   * This is contextual information for THIS request.
+   * Permanent rename rules remain in buildSystemPrompt().
+   * ---------------------------------------------------------
+   */
+  if (isRenameRequest) {
+    sections.push(
+      "",
+      "================ RENAME TASK =================",
+      "",
+      "Before creating the plan, determine whether this request requires:",
+      "",
+      "- changing a symbol name only",
+      "- renaming an actual file",
+      "- renaming an actual directory",
+      "- updating imports/references",
+      "- updating tests",
+      "- or a combination of these",
+      "",
+      "Use the project references, current file, related files,",
+      "and graph context to determine the required operations.",
+      "",
+      "IMPORTANT:",
+      "A symbol rename and a filesystem rename are different operations.",
+      "Do not assume that changing every textual occurrence means the file itself should be renamed.",
+      "",
+      "For example:",
+      "",
+      "User request:",
+      "Rename TodoList to TodoCollection everywhere.",
+      "",
+      "Potential consequences:",
+      "- TodoList symbol may become TodoCollection.",
+      "- TodoList.tsx may need to become TodoCollection.tsx.",
+      "- A TodoList directory may need to become TodoCollection.",
+      "- Imports may need to be updated.",
+      "- JSX usages may need to be updated.",
+      "- Tests may need to be updated.",
+      "",
+      "Only include operations that are actually required by the project.",
+      "",
+      "=============== END RENAME TASK ===============",
+    );
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * 9. PLANNING INSTRUCTIONS FOR THIS REQUEST
+   * ---------------------------------------------------------
+   */
   sections.push(
     "",
-    "================ PLANNING RULES ===============",
-    "1. Use the smallest safe set of files necessary.",
-    "2. For 'everywhere', 'all references', 'all usages', 'rename', or 'replace' requests, inspect project-wide references.",
-    "3. targetFiles must include every file that needs modification.",
-    "4. Do not include files that do not need modification.",
-    "5. Preserve tests when they refer to the changed symbol.",
-    "6. Include related imports/usages when they must change because of the requested operation.",
-    "7. Do not modify generated files, build output, dependency folders, or unrelated files.",
-    "8. Do not make changes yet. Only produce the plan.",
+    "================ TASK INSTRUCTIONS ============",
+    "1. Analyze the user's exact request before deciding target files.",
+    "2. Use the active file when the request is file-specific.",
+    "3. Use related files when dependencies/references require them.",
+    "4. Use project-wide references for project-wide requests.",
+    "5. Use graph relationships to understand dependencies and dependents.",
+    "6. Prefer the smallest safe set of affected files.",
+    "7. targetFiles must include every file that will actually be modified or renamed.",
+    "8. Do not add unrelated files merely because they mention a similar name.",
+    "9. Preserve tests when they are affected by the requested change.",
+    "10. Do not include generated output, build output, dependency folders, or unrelated files.",
+    "11. Plan only. Do not generate replacement file contents.",
+    "12. Do not claim that changes have already been applied.",
+    "13. Distinguish content modifications from filesystem operations.",
+    "14. For rename requests, identify the required rename and modification operations separately.",
     "================================================",
   );
 
@@ -290,36 +489,104 @@ function parseAgentPlan(rawText: string): AgentPlan {
 function normalizeAgentPlan(plan: AgentPlan, context: AgentContext): AgentPlan {
   const targetFiles = new Set<string>();
 
+  /*
+   * ---------------------------------------------------------
+   * 1. Trust the planner's explicitly selected targetFiles.
+   * ---------------------------------------------------------
+   */
   for (const file of plan.targetFiles) {
     if (typeof file === "string" && file.trim()) {
       targetFiles.add(normalizePath(file));
     }
   }
 
+  /*
+   * ---------------------------------------------------------
+   * 2. Every explicit change in the plan must also be a
+   *    target file.
+   *
+   *    This protects us if the model puts a file in changes[]
+   *    but forgets to add it to targetFiles[].
+   * ---------------------------------------------------------
+   */
   for (const change of plan.changes) {
     if (typeof change.path === "string" && change.path.trim()) {
       targetFiles.add(normalizePath(change.path));
     }
-  }
 
-  if (context.projectReferences && context.projectReferences.length > 0) {
-    for (const reference of context.projectReferences) {
-      targetFiles.add(normalizePath(reference.path));
+    /*
+     * Rename operations affect BOTH paths.
+     *
+     * The old path must be considered an affected file even
+     * though path represents the destination/new path.
+     */
+    if (change.operation === "rename") {
+      if (
+        typeof change.originalPath === "string" &&
+        change.originalPath.trim()
+      ) {
+        targetFiles.add(normalizePath(change.originalPath));
+      }
+
+      if (typeof change.newPath === "string" && change.newPath.trim()) {
+        targetFiles.add(normalizePath(change.newPath));
+      }
     }
   }
 
+  /*
+   * ---------------------------------------------------------
+   * 3. For file-specific requests, fall back to the active
+   *    file ONLY if the planner produced no target files.
+   *
+   *    Do NOT automatically add projectReferences here.
+   * ---------------------------------------------------------
+   */
   if (targetFiles.size === 0 && context.currentFile?.path) {
     targetFiles.add(normalizePath(context.currentFile.path));
   }
 
+  /*
+   * ---------------------------------------------------------
+   * 4. Normalize the change paths.
+   * ---------------------------------------------------------
+   */
+  const normalizedChanges = plan.changes.map((change) => ({
+    ...change,
+    path: normalizePath(change.path),
+    originalPath: change.originalPath
+      ? normalizePath(change.originalPath)
+      : undefined,
+    newPath: change.newPath ? normalizePath(change.newPath) : undefined,
+  }));
+
   return {
     ...plan,
     targetFiles: [...targetFiles],
-    changes: plan.changes.map((change) => ({
-      ...change,
-      path: normalizePath(change.path),
-    })),
+    changes: normalizedChanges,
   };
+}
+
+function validateAgentPlan(plan: AgentPlan): AgentPlan {
+  for (const change of plan.changes) {
+    if (change.operation === "rename") {
+      if (!change.originalPath || !change.newPath) {
+        throw new Error(
+          `Invalid rename operation for "${change.path}". Both originalPath and newPath are required.`,
+        );
+      }
+
+      if (
+        normalizePath(change.originalPath) === normalizePath(change.newPath)
+      ) {
+        throw new Error(
+          `Invalid rename operation: source and destination are identical for "${change.path}".`,
+        );
+      }
+    }
+  }
+
+  return plan;
 }
 
 function normalizePath(value: string): string {

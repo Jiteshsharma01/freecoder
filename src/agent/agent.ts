@@ -39,9 +39,9 @@ export async function runAgentTask(
 
     changes: plan.changes.map((change) => ({
       path: change.path,
-
       operation: change.operation,
-
+      originalPath: change.originalPath,
+      newPath: change.newPath,
       explanation: change.reason,
     })),
 
