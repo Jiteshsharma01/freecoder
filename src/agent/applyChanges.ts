@@ -347,3 +347,212 @@ async function saveModifiedDocuments(
     }
   }
 }
+
+function resolveSafePathForUndo(
+  rootPath: string,
+  relativePath: string,
+): string {
+  if (path.isAbsolute(relativePath)) {
+    throw new Error(`Absolute paths are not allowed: ${relativePath}`);
+  }
+  const absolutePath = path.resolve(rootPath, relativePath);
+  const relativeFromRoot = path.relative(rootPath, absolutePath);
+  if (relativeFromRoot.startsWith("..") || path.isAbsolute(relativeFromRoot)) {
+    throw new Error(`Path escapes workspace: ${relativePath}`);
+  }
+  return absolutePath;
+}
+
+export async function captureAppliedSnapshots(
+  rootPath: string,
+  changes: FileChange[],
+): Promise<void> {
+  for (const change of changes) {
+    /*
+     * ---------------------------------------------------------
+     * CREATE / MODIFY
+     * ---------------------------------------------------------
+     */
+    if (change.operation === "create" || change.operation === "modify") {
+      const absolutePath = resolveSafePath(rootPath, change.path);
+      const uri = vscode.Uri.file(absolutePath);
+      const exists = await fileExists(uri);
+      if (!exists) {
+        throw new Error(
+          `Unable to capture applied content for ${change.path}: file does not exist after applying changes.`,
+        );
+      }
+      const document = await vscode.workspace.openTextDocument(uri);
+      change.appliedContent = document.getText();
+      continue;
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * DELETE
+     * ---------------------------------------------------------
+     *
+     * There is no content after deletion.
+     */
+    if (change.operation === "delete") {
+      change.appliedContent = undefined;
+      continue;
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * RENAME
+     * ---------------------------------------------------------
+     *
+     * Read the content from the NEW path because that is
+     * where the file now lives.
+     */
+    if (change.operation === "rename") {
+      if (!change.newPath) {
+        throw new Error(
+          `Unable to capture applied content for rename: newPath is missing.`,
+        );
+      }
+      const absolutePath = resolveSafePath(rootPath, change.newPath);
+      const uri = vscode.Uri.file(absolutePath);
+      const exists = await fileExists(uri);
+      if (!exists) {
+        throw new Error(
+          `Unable to capture applied content for renamed file: ${change.newPath}`,
+        );
+      }
+      const document = await vscode.workspace.openTextDocument(uri);
+      change.appliedContent = document.getText();
+      continue;
+    }
+
+    throw new Error(
+      `Unsupported Agent operation while capturing applied snapshot: ${change.operation}`,
+    );
+  }
+}
+
+export async function verifyChangesCanBeUndone(
+  rootPath: string,
+  changes: FileChange[],
+): Promise<void> {
+  for (const change of changes) {
+    /*
+     * -------------------------------------------------------
+     * CREATE
+     *
+     * The Agent created the file.
+     * It should still contain exactly the Agent-generated
+     * content before we delete it.
+     * -------------------------------------------------------
+     */
+    if (change.operation === "create") {
+      const absolutePath = resolveSafePathForUndo(rootPath, change.path);
+      const uri = vscode.Uri.file(absolutePath);
+      const exists = await fileExists(uri);
+      if (!exists) {
+        throw new Error(
+          `Cannot undo creation of ${change.path}: the file no longer exists.`,
+        );
+      }
+
+      if (change.appliedContent !== undefined) {
+        const document = await vscode.workspace.openTextDocument(uri);
+        if (document.getText() !== change.appliedContent) {
+          throw new Error(
+            `Cannot undo ${change.path}: the file was modified after the Agent created it.`,
+          );
+        }
+      }
+      continue;
+    }
+
+    /*
+     * -------------------------------------------------------
+     * DELETE
+     *
+     * The Agent deleted the file.
+     * It should still be absent.
+     * -------------------------------------------------------
+     */
+    if (change.operation === "delete") {
+      const absolutePath = resolveSafePathForUndo(rootPath, change.path);
+      const uri = vscode.Uri.file(absolutePath);
+      const exists = await fileExists(uri);
+      if (exists) {
+        throw new Error(
+          `Cannot undo ${change.path}: the file has been recreated or changed after the Agent deleted it.`,
+        );
+      }
+      continue;
+    }
+
+    /*
+     * -------------------------------------------------------
+     * RENAME
+     * -------------------------------------------------------
+     */
+    if (change.operation === "rename") {
+      if (!change.originalPath || !change.newPath) {
+        throw new Error(
+          `Cannot undo rename ${change.path}: originalPath and newPath are required.`,
+        );
+      }
+      const currentUri = vscode.Uri.file(
+        resolveSafePathForUndo(rootPath, change.newPath),
+      );
+      const originalUri = vscode.Uri.file(
+        resolveSafePathForUndo(rootPath, change.originalPath),
+      );
+      const currentExists = await fileExists(currentUri);
+      if (!currentExists) {
+        throw new Error(
+          `Cannot undo rename: ${change.newPath} no longer exists.`,
+        );
+      }
+      const originalExists = await fileExists(originalUri);
+      if (originalExists) {
+        throw new Error(
+          `Cannot undo rename: original path already exists: ${change.originalPath}`,
+        );
+      }
+      if (change.appliedContent !== undefined) {
+        const document = await vscode.workspace.openTextDocument(currentUri);
+        if (document.getText() !== change.appliedContent) {
+          throw new Error(
+            `Cannot undo ${change.newPath}: the file was modified after the Agent renamed it.`,
+          );
+        }
+      }
+      continue;
+    }
+
+    /*
+     * -------------------------------------------------------
+     * MODIFY
+     *
+     * The current content must still equal the content
+     * generated by the Agent.
+     * -------------------------------------------------------
+     */
+    if (change.operation === "modify") {
+      const absolutePath = resolveSafePathForUndo(rootPath, change.path);
+      const uri = vscode.Uri.file(absolutePath);
+      const exists = await fileExists(uri);
+      if (!exists) {
+        throw new Error(
+          `Cannot undo ${change.path}: the file no longer exists.`,
+        );
+      }
+      if (change.appliedContent !== undefined) {
+        const document = await vscode.workspace.openTextDocument(uri);
+        const currentContent = document.getText();
+        if (currentContent !== change.appliedContent) {
+          throw new Error(
+            `Cannot undo ${change.path}: the file was modified after the Agent applied its changes.`,
+          );
+        }
+      }
+    }
+  }
+}

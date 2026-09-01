@@ -15,12 +15,17 @@ import { AgentTask } from "./agent/types";
 import { runAgentTask } from "./agent/agent";
 import { generateFileChanges } from "./agent/changeGenerator";
 import { closeAgentDiffs, showAgentDiffs } from "./agent/diffPreview";
-import { applyFileChanges } from "./agent/applyChanges";
+import {
+  applyFileChanges,
+  captureAppliedSnapshots,
+  verifyChangesCanBeUndone,
+} from "./agent/applyChanges";
 import {
   FREECOPILOT_DIFF_SCHEME,
   FreeCopilotDiffProvider,
 } from "./agent/virtualDiffProvider";
 import { ProjectAnalysis } from "./projectAnalysis/types";
+import { validateProject } from "./agent/validator";
 
 export function activate(context: vscode.ExtensionContext) {
   const diffProvider = new FreeCopilotDiffProvider();
@@ -106,18 +111,28 @@ function looksLikeExplicitPath(value: string): boolean {
 
 function extractDeleteTarget(instruction: string): string | null {
   /*
-   * Supports:
-   *
-   * Remove file testFile.tsx
-   * Remove testFile.tsx
-   * Remove src/utils/testFile.tsx
-   * Delete "src/utils/testFile.tsx"
+   * Explicit:
+   * Remove file src/utils/logger.ts
+   * Delete file testFile.tsx
    */
-  const match = instruction.match(
-    /\b(?:remove|delete|erase)\s+(?:the\s+)?(?:file\s+)?[`"']?([A-Za-z0-9_$./\\-]+)[`"']?/i,
+  const explicitFileMatch = instruction.match(
+    /\b(?:remove|delete|erase)\s+(?:the\s+)?(?:file|folder|directory)\s+[`"']?([A-Za-z0-9_$./\\-]+)[`"']?/i,
   );
-
-  return match?.[1]?.trim() ?? null;
+  if (explicitFileMatch?.[1]) {
+    return explicitFileMatch[1].trim();
+  }
+  /*
+   * Filename-only:
+   * Remove testFile.tsx
+   * Delete logger.ts
+   */
+  const filenameMatch = instruction.match(
+    /\b(?:remove|delete|erase)\s+[`"']?([A-Za-z0-9_$-]+\.[A-Za-z0-9_-]+)[`"']?/i,
+  );
+  if (filenameMatch?.[1]) {
+    return filenameMatch[1].trim();
+  }
+  return null;
 }
 
 function normalizeWorkspacePath(value: string): string {
@@ -184,6 +199,150 @@ function resolveDeleteCandidates(
     requestedName,
     matches,
   };
+}
+
+function resolveSafePathForUndo(
+  rootPath: string,
+  relativePath: string,
+): string {
+  /*
+   * Never allow the Agent to use an absolute path.
+   */
+  if (path.isAbsolute(relativePath)) {
+    throw new Error(`Absolute paths are not allowed: ${relativePath}`);
+  }
+
+  /*
+   * Resolve the path against the workspace root.
+   */
+  const absolutePath = path.resolve(rootPath, relativePath);
+
+  /*
+   * Calculate the path back from workspace root.
+   */
+  const relativeFromRoot = path.relative(rootPath, absolutePath);
+
+  /*
+   * If the path starts with ".." or becomes absolute,
+   * it escaped the workspace.
+   */
+  if (relativeFromRoot.startsWith("..") || path.isAbsolute(relativeFromRoot)) {
+    throw new Error(`Path escapes workspace: ${relativePath}`);
+  }
+
+  return absolutePath;
+}
+
+function shouldUseProjectContext(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  // EXPLICIT PROJECT / FILE CONTEXT. These phrases clearly indicate that the user wants FreeCopilot to understand their workspace/code.
+  const projectIndicators = [
+    "my project",
+    "this project",
+    "in my project",
+    "in this project",
+    "my code",
+    "this code",
+    "in my code",
+    "in this code",
+    "my app",
+    "this app",
+    "in my app",
+    "in this app",
+    "my repository",
+    "this repository",
+    "my workspace",
+    "this workspace",
+    "project structure",
+    "project architecture",
+    "project files",
+    "this file",
+    "this component",
+    "this function",
+    "this class",
+    "my component",
+    "my function",
+    "my class",
+  ];
+  if (projectIndicators.some((indicator) => normalized.includes(indicator))) {
+    return true;
+  }
+  // PROJECT-SPECIFIC ACTIONS
+  const projectActions = [
+    "fix this",
+    "fix my",
+    "modify this",
+    "modify my",
+    "change this",
+    "change my",
+    "update this",
+    "update my",
+    "refactor this",
+    "refactor my",
+    "debug this",
+    "debug my",
+    "implement this",
+    "implement in this",
+    "where is this used",
+    "where is it used",
+    "find this in the project",
+    "find all references",
+    "all references",
+    "all usages",
+    "all occurrences",
+    "everywhere",
+  ];
+  if (projectActions.some((indicator) => normalized.includes(indicator))) {
+    return true;
+  }
+  return false;
+}
+
+export function isFileDeletionRequest(instruction: string): boolean {
+  const normalized = instruction.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  /*
+   * Explicit filesystem deletion language.
+   *
+   * Examples:
+   *
+   * remove file logger.ts
+   * delete file test.tsx
+   * erase file config.json
+   */
+  if (
+    /\b(?:remove|delete|erase)\s+(?:the\s+)?(?:file|folder|directory)\b/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+
+  /*
+   * Filename-based deletion.
+   *
+   * Examples:
+   *
+   * remove testFile.tsx
+   * delete logger.ts
+   *
+   * This intentionally requires something that looks like
+   * a filename rather than accepting "remove unused".
+   */
+  if (
+    /\b(?:remove|delete|erase)\s+[`"']?[A-Za-z0-9_$.-]+\.[A-Za-z0-9_-]+[`"']?/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+  return false;
 }
 
 class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
@@ -266,6 +425,12 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         case "applyAgentTask":
           await this.applyAgentTask();
           break;
+        case "undoAgentChanges":
+          await this.undoAgentChanges();
+          break;
+        case "stopAgent":
+          this.stopAgent();
+          break;
         case "cancelAgentTask":
           this.cancelAgentTask();
           break;
@@ -278,9 +443,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             this._activeAbortController.abort();
             this._activeAbortController = null;
           }
-          break;
-        case "stopAgent":
-          this.stopAgent();
           break;
         case "requestClearConfirmation": {
           const selection = await vscode.window.showWarningMessage(
@@ -413,6 +575,10 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
     const task = this._currentTask;
 
+    /*
+     * Apply is allowed only after the user has reviewed
+     * the generated diff.
+     */
     if (task.status !== "diff") {
       vscode.window.showWarningMessage(
         "No reviewed changes are ready to apply.",
@@ -428,11 +594,15 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     }
 
     try {
+      /*
+       * ---------------------------------------------------------
+       * STEP 1: APPLY
+       * ---------------------------------------------------------
+       */
       task.status = "applying";
 
       this._webviewView?.show(true);
 
-      // STEP 7
       this._webviewView?.webview.postMessage({
         command: "agentProgress",
         stage: "applying",
@@ -444,44 +614,94 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       });
 
       await applyFileChanges(rootPath, task.changes);
-
+      await captureAppliedSnapshots(rootPath, task.changes);
+      /*
+       * Close the virtual diff only after the real workspace
+       * edit has successfully been applied.
+       */
       await closeAgentDiffs();
+      /*
+       * ---------------------------------------------------------
+       * STEP 2: VALIDATION
+       * ---------------------------------------------------------
+       */
+      this._webviewView?.webview.postMessage({
+        command: "agentProgress",
+        stage: "validation",
+        text: "Changes applied. Validating the project...",
+      });
 
-      task.status = "completed";
+      const validation = await validateProject(rootPath);
 
+      /*
+       * Refresh ProjectAnalysis / Knowledge Graph after
+       * the actual workspace has changed.
+       */
       await this.refreshProjectAnalysis();
 
+      /*
+       * The WorkspaceEdit succeeded, so the Agent task itself
+       * is completed even if validation found problems.
+       */
+      task.status = "completed";
       this._currentTask = task;
+      /*
+       * Send validation details to the WebView.
+       */
+      this._webviewView?.webview.postMessage({
+        command: "agentValidationResult",
+        validation,
+      });
 
-      // STEP 8
+      /*
+       * Tell the WebView the entire Agent operation finished.
+       */
       this._webviewView?.webview.postMessage({
         command: "agentExecutionCompleted",
-
         changes: task.changes.map((change) => ({
           path: change.path,
-
           operation: change.operation,
         })),
+        validation,
       });
 
-      vscode.window.showInformationMessage(
-        `FreeCopilot successfully applied ${task.changes.length} change${
-          task.changes.length === 1 ? "" : "s"
-        }.`,
-      );
+      /*
+       * User-facing result.
+       */
+      if (validation.status === "failed") {
+        vscode.window.showWarningMessage(
+          [
+            `FreeCopilot applied ${task.changes.length} change${
+              task.changes.length === 1 ? "" : "s"
+            }, but project validation found problems.`,
+            "Review the validation results in the FreeCopilot panel.",
+          ].join(" "),
+        );
+      } else if (validation.status === "skipped") {
+        vscode.window.showInformationMessage(
+          `FreeCopilot successfully applied ${task.changes.length} change${
+            task.changes.length === 1 ? "" : "s"
+          }. Project validation was skipped.`,
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          `FreeCopilot successfully applied ${task.changes.length} change${
+            task.changes.length === 1 ? "" : "s"
+          } and project validation passed.`,
+        );
+      }
     } catch (error: any) {
+      /*
+       * This catch represents an actual failure to apply the
+       * changes, not a validation failure.
+       */
       task.status = "failed";
-
       const message = error?.message ?? "Unknown error while applying changes.";
-
       this._currentTask = task;
-
       this._webviewView?.webview.postMessage({
         command: "agentExecutionFailed",
-
         text: message,
       });
-
       vscode.window.showErrorMessage(
         `Agent could not apply changes: ${message}`,
       );
@@ -506,8 +726,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   // Fully converted to real-time NDJSON chunk stream handling with Abort Signal integration
   private async handleChatMessage(data: any, webviewView: vscode.WebviewView) {
     const { text, provider, attachment, attachmentType } = data;
-
-    // Block multi-modal payloads from dropping into local textual models
+    // BLOCK UNSUPPORTED LOCAL IMAGE INPUT
     if (attachment && attachmentType?.startsWith("image/")) {
       if (provider === "ollama-qwen3-local") {
         webviewView.webview.postMessage({
@@ -518,59 +737,81 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    // Check for file attachments first (Always processed if present)
+    // FILE ATTACHMENT CONTEXT
     let attachedFileContext = "";
-    const hasFileAttachment =
-      attachment && !attachmentType?.startsWith("image/");
+    const hasFileAttachment = Boolean(attachment && !attachmentType?.startsWith("image/"));
     if (hasFileAttachment) {
-      attachedFileContext = `\n\n[USER ATTACHED FILE CONTEXT]\n\`\`\`\n${attachment}\n\`\`\``;
+      attachedFileContext = [
+        "",
+        "",
+        "[USER ATTACHED FILE CONTEXT]",
+        "```",
+        attachment,
+        "```",
+      ].join("\n");
     }
 
-    const rootPath = getWorkspaceRoot();
+    // DECIDE WHETHER NORMAL CHAT NEEDS PROJECT CONTEXT
+    const needsProjectContext = shouldUseProjectContext(text);
+
+    // BUILD PROJECT CONTEXT ONLY WHEN REQUIRED
     let projectContextText = "";
-    if (rootPath) {
-      try {
-        const analysis = await analyzeProject(rootPath);
-        const graph = await loadKnowledgeGraph(rootPath);
-        const projectContext = await buildProjectContext({
-          rootPath,
-          instruction: text,
-          analysis,
-          graph,
-        });
-        projectContextText = formatProjectContextForAI(projectContext);
-      } catch (error) {
-        console.error("Failed to build project context:", error);
+
+    if (needsProjectContext) {
+      const rootPath = getWorkspaceRoot();
+      if (rootPath) {
+        try {
+          const analysis = await analyzeProject(rootPath);
+          const graph = await loadKnowledgeGraph(rootPath);
+          const projectContext = await buildProjectContext({
+            rootPath,
+            instruction: text,
+            analysis,
+            graph,
+          });
+          projectContextText = formatProjectContextForAI(projectContext);
+        } catch (error) {
+          console.error("Failed to build project context:", error);
+        }
       }
     }
 
-    let finalPromptWithContext =
+    // FINAL PROMPT
+    const finalPromptWithContext =
       text + attachedFileContext + projectContextText;
 
-    // Fire initialization container command to HTML frontend UI
+    // START STREAM UI
     webviewView.webview.postMessage({
       command: "startStream",
       provider: "Qwen3-Coder",
     });
 
+    // NORMAL CHAT ABORT CONTROLLER
     this._activeAbortController = new AbortController();
 
     try {
       if (provider === "ollama-qwen3-local") {
         const OLLAMA_URL = "http://localhost:11434/api/chat";
 
-        // Update the System Prompt to guide the model on how to behave with or without context or attachment
-        // let systemMessage = "You are an expert programming tutor and developer assistant.";
-        let systemMessage = [
+        // NORMAL CHAT SYSTEM PROMPT
+        const systemMessage = [
           "You are Free Copilot, an expert software engineering assistant.",
           "",
           "You are running inside VS Code.",
           "",
-          "The user may ask questions about the currently active file,",
-          "selected code, related files, or the entire project.",
+          "The user may ask general programming questions or",
+          "questions about the currently active file, selected code,",
+          "related files, or the entire project.",
           "",
-          "Use the provided project context to understand relationships",
-          "between files before answering.",
+          "Project context is only provided when the request clearly",
+          "requires understanding the user's workspace or code.",
+          "",
+          "When project context is provided, use it to understand",
+          "relationships between files before answering.",
+          "",
+          "When no project context is provided, answer the user's",
+          "question using your general programming knowledge and",
+          "the explicitly supplied attachment context.",
           "",
           "When the user asks for an explanation, explain the code clearly.",
           "",
@@ -580,14 +821,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           "",
           "When context is provided, prefer it over assumptions.",
         ].join("\n");
-
-        // if (hasFileAttachment && needsProjectTreeMap) {
-        //     systemMessage = "You are an expert workspace AI assistant. You have full context of the uploaded file AND the developer's project directory tree map layout.";
-        // } else if (hasFileAttachment) {
-        //     systemMessage = "You are an expert programming assistant. Analyze the specific file context attached by the user to answer their question directly.";
-        // } else if (needsProjectTreeMap) {
-        //     systemMessage = "You are an expert architectural AI assistant. Review the provided workspace folder map blueprint to guide the user.";
-        // }
 
         const payload = {
           model: "qwen3-coder:30b",
@@ -604,6 +837,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           stream: true,
         };
 
+        // OLLAMA REQUEST
         const response = await fetch(OLLAMA_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -615,9 +849,9 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           throw new Error(`Server returned HTTP ${response.status}`);
         }
 
+        // STREAM READER
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
-
         if (!reader) {
           throw new Error(
             "Could not initialize network response text stream reader.",
@@ -625,7 +859,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         }
 
         let buffer = "";
-
+        // READ NDJSON STREAM
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
@@ -635,23 +869,20 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
-
           for (const line of lines) {
             if (line.trim() === "") {
               continue;
             }
-
             try {
               const parsedChunk = JSON.parse(line);
               const tokenText = parsedChunk.message?.content || "";
-
               if (tokenText) {
                 webviewView.webview.postMessage({
                   command: "appendStream",
                   text: tokenText,
                 });
               }
-            } catch (e) {}
+            } catch {}
           }
         }
 
@@ -664,12 +895,14 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.postMessage({ command: "endStream" });
       }
     } catch (error: any) {
-      if (error.name === "AbortError") {
+      if (error?.name === "AbortError") {
         console.log("Ollama stream generation aborted by the user.");
       } else {
         webviewView.webview.postMessage({
           command: "showError",
-          text: `Ollama Connection Error: Failed to talk to local engine. Details: ${error.message}`,
+          text: `Ollama Connection Error: Failed to talk to local engine. Details: ${
+            error?.message ?? "Unknown error"
+          }`,
         });
       }
     } finally {
@@ -775,19 +1008,18 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        *    choosing between multiple files with the same name.
        * -------------------------------------------------------
        */
-      const isDeleteRequest = /\b(?:remove|delete|erase)\b/i.test(instruction);
+      const isDeleteRequest = isFileDeletionRequest(instruction);
 
       if (isDeleteRequest) {
         const deleteResolution = resolveDeleteCandidates(instruction, analysis);
 
-        if (deleteResolution && deleteResolution.matches.length === 0) {
+        if (deleteResolution?.matches.length === 0) {
           const message = `Could not find a file named "${deleteResolution.requestedName}" in the workspace.`;
 
           vscode.window.showWarningMessage(message);
 
           this._webviewView?.webview.postMessage({
             command: "agentExecutionFailed",
-
             text: message,
           });
 
@@ -804,9 +1036,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             deleteResolution.matches,
             {
               title: `Multiple files named "${deleteResolution.requestedName}" were found`,
-
               placeHolder: "Select the file you want FreeCopilot to remove",
-
               ignoreFocusOut: true,
             },
           );
@@ -833,12 +1063,11 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             "==========================================================",
           ].join("\n");
         } else if (deleteResolution && deleteResolution.matches.length === 1) {
-
-        /*
-         * One exact match.
-         *
-         * No dialog necessary.
-         */
+          /*
+           * One exact match.
+           *
+           * No dialog necessary.
+           */
           const selected = deleteResolution.matches[0];
 
           agentInstruction = [
@@ -964,6 +1193,162 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        * Generate Changes can use it.
        */
       this._agentAbortController = null;
+    }
+  }
+
+  private async undoAgentChanges(): Promise<void> {
+    if (!this._currentTask) {
+      vscode.window.showWarningMessage(
+        "There is no completed Agent task to undo.",
+      );
+      return;
+    }
+    const task = this._currentTask;
+    if (task.status !== "completed") {
+      vscode.window.showWarningMessage(
+        "Only a completed Agent task can be undone.",
+      );
+      return;
+    }
+    if (task.changes.length === 0) {
+      vscode.window.showWarningMessage(
+        "The completed Agent task contains no changes to undo.",
+      );
+      return;
+    }
+    const rootPath = getWorkspaceRoot();
+    if (!rootPath) {
+      return;
+    }
+    const selection = await vscode.window.showWarningMessage(
+      "Undo all changes made by the last FreeCopilot Agent task?",
+      {
+        modal: true,
+      },
+      "Undo Changes",
+    );
+    if (selection !== "Undo Changes") {
+      this._webviewView?.webview.postMessage({
+        command: "agentUndoCancelled",
+      });
+      return;
+    }
+
+    try {
+      /*
+       * Verify that nobody has modified the workspace
+       * after the Agent applied its changes.
+       */
+      await verifyChangesCanBeUndone(rootPath, task.changes);
+      const workspaceEdit = new vscode.WorkspaceEdit();
+      for (const change of task.changes) {
+        const uri = vscode.Uri.file(
+          resolveSafePathForUndo(rootPath, change.path),
+        );
+        switch (change.operation) {
+          case "create": {
+            /*
+             * Agent created it.
+             * Undo = delete it.
+             */
+            workspaceEdit.deleteFile(uri, {
+              ignoreIfNotExists: false,
+              recursive: false,
+            });
+            break;
+          }
+
+          case "modify": {
+            if (change.originalContent === undefined) {
+              throw new Error(
+                `Cannot undo ${change.path}: original content is missing.`,
+              );
+            }
+            const document = await vscode.workspace.openTextDocument(uri);
+            const fullRange = new vscode.Range(
+              document.positionAt(0),
+              document.positionAt(document.getText().length),
+            );
+            workspaceEdit.replace(uri, fullRange, change.originalContent);
+            break;
+          }
+
+          case "delete": {
+            if (change.originalContent === undefined) {
+              throw new Error(
+                `Cannot undo ${change.path}: original content is missing.`,
+              );
+            }
+            workspaceEdit.createFile(uri, {
+              overwrite: false,
+              ignoreIfExists: false,
+            });
+            workspaceEdit.insert(
+              uri,
+              new vscode.Position(0, 0),
+              change.originalContent,
+            );
+            break;
+          }
+
+          case "rename": {
+            if (!change.originalPath || !change.newPath) {
+              throw new Error(
+                `Cannot undo rename ${change.path}: originalPath and newPath are required.`,
+              );
+            }
+            const currentUri = vscode.Uri.file(
+              resolveSafePathForUndo(rootPath, change.newPath),
+            );
+            const originalUri = vscode.Uri.file(
+              resolveSafePathForUndo(rootPath, change.originalPath),
+            );
+            workspaceEdit.renameFile(currentUri, originalUri, {
+              overwrite: false,
+              ignoreIfExists: false,
+            });
+            break;
+          }
+
+          default:
+            throw new Error(
+              `Unsupported Agent undo operation: ${change.operation}`,
+            );
+        }
+      }
+
+      const applied = await vscode.workspace.applyEdit(workspaceEdit);
+      if (!applied) {
+        throw new Error("VS Code rejected the Agent undo operation.");
+      }
+
+      /*
+       * Refresh project metadata after the workspace
+       * has been restored.
+       */
+      await this.refreshProjectAnalysis();
+
+      this._webviewView?.webview.postMessage({
+        command: "agentChangesUndone",
+      });
+
+      vscode.window.showInformationMessage(
+        `FreeCopilot successfully undid ${task.changes.length} change${
+          task.changes.length === 1 ? "" : "s"
+        }.`,
+      );
+    } catch (error: any) {
+      const message =
+        error?.message ?? "Unknown error while undoing Agent changes.";
+
+      this._webviewView?.webview.postMessage({
+        command: "agentUndoFailed",
+        text: message,
+      });
+
+      vscode.window.showErrorMessage(
+        `FreeCopilot could not undo the Agent changes: ${message}`,
+      );
     }
   }
 

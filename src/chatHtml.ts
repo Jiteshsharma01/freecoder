@@ -108,6 +108,8 @@ export function getChatHtml(webviewUri: string): string {
             let agentPlanDiv = null;
             let agentReviewDiv = null;
             let normalChatBusy = false;
+            let isUserScrollingCodeBlock = false;
+            let latestAgentValidation = null;
 
             // Track scrolling state explicitly
             let isUserScrolledUp = false; 
@@ -176,6 +178,25 @@ export function getChatHtml(webviewUri: string): string {
                             btn.innerText = 'Copied!';
                             setTimeout(() => btn.innerText = originalText, 1500);
                         }
+                    });
+                });
+            }
+            
+            function attachCodeBlockScrollListeners() {
+                document.querySelectorAll('.code-container-scroll').forEach(function(container) {
+                    if (container.hasAttribute('data-scroll-hooked')) {
+                        return;
+                    }
+                    container.setAttribute('data-scroll-hooked', 'true');
+                    container.addEventListener('wheel', function() {
+                        isUserScrollingCodeBlock = true;
+                    }, { passive: true });
+
+                    container.addEventListener('touchstart',function() {
+                        isUserScrollingCodeBlock = true;
+                    }, { passive: true });
+                    container.addEventListener('pointerdown', function() {
+                        isUserScrollingCodeBlock = true;
                     });
                 });
             }
@@ -255,6 +276,15 @@ export function getChatHtml(webviewUri: string): string {
                 status.innerText = text;
                 chatLog.appendChild(status);
                 scrollToBottom();
+            }
+            
+            function safeEscape(value) {
+                return String(value ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
             }
             
             function renderApplyButton() {
@@ -396,15 +426,10 @@ export function getChatHtml(webviewUri: string): string {
                 var userInputEl = document.getElementById('user-input');
                 var text = userInputEl.value.trim();
                 if (!text) { return; }
+                removeAgentValidation();
+                setAgentButtonBusy(true);
                 var chatLog = document.getElementById('chat-log');
-                var safeEscape = function(value) {
-                    return String(value || '')
-                        .replace(/&/g, '&amp;')
-                        .replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;')
-                        .replace(/"/g, '&quot;')
-                        .replace(/'/g, '&#039;');
-                };
+
                 chatLog.innerHTML +=
                     '<div class="msg user-msg">' +
                         '<b style="font-size: 13px;">You → Agent:</b>' +
@@ -433,15 +458,6 @@ export function getChatHtml(webviewUri: string): string {
                 document.getElementById('stop-btn').style.display = 'block';
                 userInputEl.disabled = true;
                 document.getElementById('provider').disabled = true;
-
-                const safeEscape = (str) => {
-                    return str
-                        .replace(/&/g, "&amp;")
-                        .replace(/</g, "&lt;")
-                        .replace(/>/g, "&gt;")
-                        .replace(/"/g, "&quot;")
-                        .replace(/'/g, "'");
-                };
 
                 const chatLog = document.getElementById('chat-log');
                 const safeText = safeEscape(text);
@@ -485,15 +501,6 @@ export function getChatHtml(webviewUri: string): string {
                     agentPlanDiv.remove();
                     agentPlanDiv = null;
                 }
-
-                var safeEscape = function(value) {
-                    return String(value || '')
-                        .replace(/&/g, '&amp;')
-                        .replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;')
-                        .replace(/"/g, '&quot;')
-                        .replace(/'/g, '&#039;');
-                };
 
                 /*
                 * Build the file-change summary.
@@ -696,6 +703,192 @@ export function getChatHtml(webviewUri: string): string {
                 scrollToBottom();
             }
 
+            function renderAgentValidation(validation) {
+                var chatLog = document.getElementById('chat-log');
+
+                if (!chatLog || !validation) {
+                    return;
+                }
+
+                /*
+                * Prevent duplicate validation cards.
+                */
+                var existingValidation = document.getElementById('agent-validation-card');
+
+                if (existingValidation) {
+                    existingValidation.remove();
+                }
+
+                var validationDiv = document.createElement('div');
+                validationDiv.className = 'msg ai-msg';
+                validationDiv.id = 'agent-validation-card';
+
+                var statusIcon =
+                    validation.status === 'passed'
+                        ? '✅'
+                        : validation.status === 'failed'
+                            ? '⚠️'
+                            : '⏭️';
+
+                var statusText =
+                    validation.status === 'passed'
+                        ? 'Project validation passed'
+                        : validation.status === 'failed'
+                            ? 'Project validation found problems'
+                            : 'Project validation was skipped';
+
+                var resultsHtml = '';
+
+                if (Array.isArray(validation.results) && validation.results.length > 0) {
+                    validation.results.forEach(
+                        function(result) {
+                            var resultIcon =
+                                result.status === 'passed'
+                                    ? '✅'
+                                    : result.status === 'failed'
+                                        ? '❌'
+                                        : '⏭️';
+
+                            resultsHtml +=
+                                '<div style="' +
+                                    'padding: 8px;' +
+                                    'margin-top: 6px;' +
+                                    'border: 1px solid var(--vscode-panel-border);' +
+                                    'border-radius: 4px;' +
+                                    'background: var(--vscode-editor-background);' +
+                                '">' +
+
+                                    '<div style="' +
+                                        'font-weight: 600;' +
+                                        'font-size: 12px;' +
+                                    '">' +
+                                        resultIcon +
+                                        ' ' +
+                                        safeEscape(
+                                            result.type ||
+                                            'Validation'
+                                        ) +
+                                    '</div>' +
+
+                                    (
+                                        result.command
+                                            ? '<div style="' +
+                                                'margin-top: 4px;' +
+                                                'font-size: 10px;' +
+                                                'opacity: 0.75;' +
+                                                'word-break: break-word;' +
+                                            '">' +
+                                                safeEscape(
+                                                    result.command
+                                                ) +
+                                            '</div>'
+                                            : ''
+                                    ) +
+
+                                    (
+                                        result.output
+                                            ? '<details style="margin-top: 6px;">' +
+                                                '<summary style="' +
+                                                    'font-size: 10px;' +
+                                                    'cursor: pointer;' +
+                                                '">' +
+                                                    'Output' +
+                                                '</summary>' +
+
+                                                '<pre style="' +
+                                                    'margin-top: 5px;' +
+                                                    'max-height: 180px;' +
+                                                    'overflow: auto;' +
+                                                    'white-space: pre-wrap;' +
+                                                    'font-size: 10px;' +
+                                                    'font-family: monospace;' +
+                                                '">' +
+                                                    safeEscape(
+                                                        result.output
+                                                    ) +
+                                                '</pre>' +
+
+                                            '</details>'
+                                            : ''
+                                    ) +
+
+                                '</div>';
+                        }
+                    );
+                }
+
+                validationDiv.innerHTML =
+                    '<div style="' +
+                        'font-weight: 600;' +
+                        'font-size: 13px;' +
+                    '">' +
+                        '🔍 Validation' +
+                    '</div>' +
+
+                    '<div style="margin-top: 6px;">' +
+                        statusIcon +
+                        ' ' +
+                        safeEscape(
+                            statusText
+                        ) +
+                    '</div>' +
+
+                    (
+                        validation.summary
+                            ? '<div style="' +
+                                'margin-top: 6px;' +
+                                'font-size: 11px;' +
+                                'line-height: 1.4;' +
+                                'white-space: pre-wrap;' +
+                                'opacity: 0.8;' +
+                            '">' +
+                                safeEscape(
+                                    validation.summary
+                                ) +
+                            '</div>'
+                            : ''
+                    ) +
+
+                    '<div style="margin-top: 8px;">' +
+                        resultsHtml +
+                    '</div>' +
+
+                    '<div style="margin-top: 10px;">' +
+                        '<button ' +
+                            'id="undo-agent-changes-btn" ' +
+                            'style="' +
+                                'width:auto;' +
+                            '"' +
+                        '>' +
+                            '↩ Undo Changes' +
+                        '</button>' +
+                    '</div>';
+
+                /*
+                * Add the validation card first.
+                */
+                chatLog.appendChild(validationDiv);
+
+                /*
+                * Bind Undo button AFTER the card exists in the DOM.
+                */
+                var undoButton = validationDiv.querySelector('#undo-agent-changes-btn');
+
+                if (undoButton) {
+                    undoButton.addEventListener(
+                        'click',
+                        function() {
+                            undoButton.disabled = true;
+                            undoButton.innerText = 'Undoing...';
+                            undoButton.style.opacity = '0.6';
+                            undoButton.style.cursor = 'not-allowed';
+                            vscode.postMessage({command:'undoAgentChanges'});
+                        }
+                    );
+                }
+                scrollToBottom();
+            }
+
             var AGENT_STAGES = [
                 {
                     id: 'planning',
@@ -728,6 +921,10 @@ export function getChatHtml(webviewUri: string): string {
                 {
                     id: 'applying',
                     label: 'Applying changes'
+                },
+                {
+                    id: 'validation',
+                    label: 'Validating project'
                 },
                 {
                     id: 'completed',
@@ -1045,9 +1242,14 @@ export function getChatHtml(webviewUri: string): string {
                     agentProgressDiv.remove();
                     agentProgressDiv = null;
                 }
-
                 agentPlanDiv = null;
                 agentReviewDiv = null;
+            }
+
+            function removeAgentValidation() {
+                var validationDiv = document.getElementById('agent-validation-card');
+                if (validationDiv) { validationDiv.remove(); }
+                latestAgentValidation = null;
             }
 
             function setAgentButtonBusy(busy) {
@@ -1097,11 +1299,24 @@ export function getChatHtml(webviewUri: string): string {
                             if (embeddedLoader) {
                                 embeddedLoader.remove();
                             }
+                            const codeContainers = currentStreamDiv.querySelectorAll('.code-container-scroll');
+                            const previousCodeScrollPositions = [];
+                            codeContainers.forEach(function(container, index) {
+                                previousCodeScrollPositions[index] = container.scrollTop;
+                            });
                             currentResponseText += message.text;
                             const contentSpan = currentStreamDiv.querySelector('.stream-content');
+                            if (!contentSpan) { return; }
                             // Re-evaluate markdown and parse into a 70px scroll container
                             contentSpan.innerHTML = formatMarkdownStream(currentResponseText);
+                            const newCodeContainers = currentStreamDiv.querySelectorAll('.code-container-scroll');
+                            newCodeContainers.forEach(function(container, index) {
+                                if (previousCodeScrollPositions[index] !== undefined) {
+                                    container.scrollTop = previousCodeScrollPositions[index];
+                                }
+                            });
                             attachAllCopyListeners();
+                            attachCodeBlockScrollListeners();
 
                             // Smart scroll focus follow check
                             if (!isUserScrolledUp) { chatLog.scrollTop = chatLog.scrollHeight; }
@@ -1161,8 +1376,11 @@ export function getChatHtml(webviewUri: string): string {
                             agentPlanDiv = null;
                         }
                         break;
+                    case 'agentValidationResult':
+                        latestAgentValidation = message.validation;
+                        break;
 
-                    case 'agentExecutionCompleted':
+                    case 'agentExecutionCompleted': {
                         setAgentButtonBusy(false);
                         if (agentPlanDiv) {
                             agentPlanDiv.remove();
@@ -1172,7 +1390,35 @@ export function getChatHtml(webviewUri: string): string {
                             agentReviewDiv.remove();
                             agentReviewDiv = null;
                         }
-                        completeAgentProgress('All approved changes were applied successfully.');
+                        completeAgentProgress('Agent task completed.');
+                        if (message.validation) {
+                            latestAgentValidation = message.validation;
+                            renderAgentValidation(message.validation);
+                        }
+                        break;
+                    }
+                    
+                    case 'agentChangesUndone': {
+                        var undoButton = document.getElementById('undo-agent-changes-btn');
+                        if (undoButton) {
+                            undoButton.disabled = true;
+                            undoButton.innerText = '↩ Changes Undone';
+                            undoButton.style.opacity = '0.6';
+                            undoButton.style.cursor = 'not-allowed';
+                        }
+                        showAgentStatus('↩ Agent changes successfully undone.');
+                        break;
+                    }
+                    
+                    case 'agentUndoFailed':
+                        var undoRetryButton = document.getElementById('undo-agent-changes-btn');
+                        if (undoRetryButton) {
+                            undoRetryButton.disabled = false;
+                            undoRetryButton.innerText = '↩ Undo Changes';
+                            undoRetryButton.style.opacity = '1';
+                            undoRetryButton.style.cursor = 'pointer';
+                        }
+                        showAgentStatus('❌ ' + message.text);
                         break;
 
                     case 'agentExecutionCancelled':

@@ -19,6 +19,7 @@ export interface AgentTask {
   context: AgentContext;
   changes: FileChange[];
   status: AgentTaskStatus;
+  undone?: boolean;
 }
 
 export interface ProjectReference {
@@ -63,5 +64,11 @@ export interface FileChange {
    * For delete operations this is undefined.
    */
   newContent?: string;
+  /*
+   * Snapshot of what actually exists in the workspace
+   * immediately after the Agent applied the change.
+   * Used only for safe Undo verification.
+   */
+  appliedContent?: string;
   explanation?: string;
 }

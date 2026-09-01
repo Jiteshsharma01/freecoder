@@ -1,3 +1,4 @@
+import { isFileDeletionRequest } from "../extension";
 import { AgentContext, FileChange } from "./types";
 
 export interface AgentPlan {
@@ -159,7 +160,7 @@ function buildPlannerPrompt(
   context: AgentContext,
 ): string {
   const sections: string[] = [];
-  const isDeleteRequest = /\b(?:remove|delete|erase)\b/i.test(instruction);
+  const isDeleteRequest = isFileDeletionRequest(instruction);
   const isRenameRequest = /\brename\b/i.test(instruction);
   const isEverywhereRequest = /\b(?:everywhere|all references|all usages|all occurrences)\b/i.test(instruction);
   const isReplaceRequest = /\breplace\b/i.test(instruction);
@@ -354,6 +355,8 @@ function buildPlannerPrompt(
       "9. Use the exact path selected or identified from the workspace.",
       "10. If the extension host provides a RESOLVED DELETE TARGET, that path is authoritative.",
       "11. Never select a different file when a resolved delete target is supplied.",
+      "12. Words such as 'remove' do not automatically mean filesystem deletion.",
+      "13. Requests such as 'remove unused import', 'remove unused variable', or 'remove dead code' are content modifications.",
       "",
       "=============== END DELETE TASK ===============",
     );
