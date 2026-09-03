@@ -25,6 +25,12 @@ export async function generateFileChanges(
   rootPath: string,
   signal?: AbortSignal,
 ): Promise<FileChange[]> {
+  if (signal?.aborted) {
+    throw new DOMException(
+      "Agent change generation was cancelled before it started.",
+      "AbortError",
+    );
+  }
   if (task.targetFiles.length === 0) {
     throw new Error("The agent plan does not contain any target files.");
   }
@@ -33,47 +39,57 @@ export async function generateFileChanges(
 
   const prompt = buildChangeGenerationPrompt(task, currentFiles);
 
-  const response = await fetch(OLLAMA_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      messages: [
-        {
-          role: "system",
-          content: buildSystemPrompt(),
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      stream: false,
-    }),
-    signal,
-  });
+  try {
+    const response = await fetch(OLLAMA_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: buildSystemPrompt(),
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        stream: false,
+      }),
+      signal,
+    });
 
-  if (!response.ok) {
-    throw new Error(`Ollama change generator returned HTTP ${response.status}`);
-  }
+    if (!response.ok) {
+      throw new Error(`Ollama change generator returned HTTP ${response.status}`);
+    }
 
-  const data = (await response.json()) as {
-    message?: {
-      content?: string;
+    const data = (await response.json()) as {
+      message?: {
+        content?: string;
+      };
     };
-  };
 
-  const rawContent = data.message?.content?.trim();
+    const rawContent = data.message?.content?.trim();
 
-  if (!rawContent) {
-    throw new Error("Ollama returned an empty change response.");
+    if (!rawContent) {
+      throw new Error("Ollama returned an empty change response.");
+    }
+
+    const parsed = parseChangeResponse(rawContent);
+
+    return validateGeneratedChanges(parsed.changes, task, currentFiles);
+  } catch (error: any) {
+    console.error("[FreeCopilot Agent] Change generation fetch failed:", {
+      name: error?.name,
+      message: error?.message,
+      signalAborted: signal?.aborted,
+      url: OLLAMA_URL,
+    });
+    throw error;
   }
-
-  const parsed = parseChangeResponse(rawContent);
-
-  return validateGeneratedChanges(parsed.changes, task, currentFiles);
 }
 
 interface CurrentFile {
@@ -596,20 +612,60 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\.\/+/, "");
 }
 
-function extractJsonObject(rawText: string): string {
-  const cleaned = rawText
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
+export function extractJsonObject(rawText: string): string {
+  const text = rawText.trim();
+  const withoutFence = text
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
     .trim();
 
-  const start = cleaned.indexOf("{");
+  try {
+    JSON.parse(withoutFence);
+    return withoutFence;
+  } catch {}
 
-  const end = cleaned.lastIndexOf("}");
+  const start = withoutFence.indexOf("{");
 
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Could not find a JSON object in the AI response.");
+  if (start === -1) {
+    throw new Error(
+      [
+        "Could not find a JSON object in the AI response.",
+        `AI response received: ${withoutFence.slice(0, 500)}`,
+      ].join(" "),
+    );
   }
 
-  return cleaned.slice(start, end + 1);
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < withoutFence.length; i++) {
+    const char = withoutFence[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      depth++;
+    } else if (char === "}") {
+      depth--;
+      if (depth === 0) {
+        return withoutFence.slice(start, i + 1);
+      }
+    }
+  }
+  throw new Error("Could not find a complete JSON object in the AI response.");
 }

@@ -6,6 +6,7 @@ export function getChatHtml(webviewUri: string): string {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
+            * { margin: 0; }
             body { font-family: sans-serif; padding: 10px; display: flex; flex-direction: column; height: 100vh; color: var(--vscode-editor-foreground); background-color: var(--vscode-sideBar-background); box-sizing: border-box; margin: 0; position: relative; }
             select, button, textarea { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--vscode-dropdown-border); background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); box-sizing: border-box; }
             button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; cursor: pointer; width: fit-content; }
@@ -107,6 +108,7 @@ export function getChatHtml(webviewUri: string): string {
             let agentProgressDiv = null;
             let agentPlanDiv = null;
             let agentReviewDiv = null;
+            let agentResponseDiv = null;
             let normalChatBusy = false;
             let isUserScrollingCodeBlock = false;
             let latestAgentValidation = null;
@@ -162,6 +164,43 @@ export function getChatHtml(webviewUri: string): string {
                     '</div>';
                 });
 
+                // 3. HEADINGS
+                formatted = formatted.replace(/^#### (.+)$/gm, '<h5 class="md-heading md-h4">$1</h5>');
+                formatted = formatted.replace(/^### (.+)$/gm, '<h4 class="md-heading md-h3">$1</h4>');
+                formatted = formatted.replace(/^## (.+)$/gm, '<h3 class="md-heading md-h2">$1</h3>');
+                formatted = formatted.replace(/^# (.+)$/gm, '<h2 class="md-heading md-h1">$1</h2>');
+
+                // 4. BOLD
+                formatted = formatted.replace(/\\*\\*([^*\\n]+)\\*\\*/g, '<strong>$1</strong>');
+
+                // 5. ITALIC
+                formatted = formatted.replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1<em>$2</em>');
+
+                // 6. INLINE CODE
+                var inlineCodeRegex = new RegExp('\\x60([^\\x60\\n]+)\\x60', 'g');
+                formatted = formatted.replace(inlineCodeRegex, '<code class="inline-code">$1</code>');
+
+                // 7. UNORDERED LIST
+                formatted = formatted.replace(
+                    /^[ \\t]*[-*][ \\t]+(.+)$/gm,
+                    '<li class="tmp-ul-item">$1</li>'
+                );
+                formatted = formatted.replace(
+                    /((?:<li class="tmp-ul-item">.*<\\/li>(?:\\n|$))+)/g,
+                    '<ul class="md-list">$1</ul>'
+                );
+                formatted = formatted.replace(/class="tmp-ul-item"/g, '');
+
+                // 8. ORDERED LIST
+                formatted = formatted.replace(
+                    /^\\d+\\.[ \t]+(.+)$/gm,
+                    '<li class="tmp-ol-item">$1</li>'
+                );
+                formatted = formatted.replace(
+                    /((?:<li class="tmp-ol-item">.*<\\/li>(?:\\n)*)+)/g,
+                    '<ol class="md-list">$1</ol>'
+                );
+                formatted = formatted.replace(/class="tmp-ol-item"/g, '');
                 return formatted;
             }
 
@@ -285,6 +324,55 @@ export function getChatHtml(webviewUri: string): string {
                     .replace(/>/g, '&gt;')
                     .replace(/"/g, '&quot;')
                     .replace(/'/g, '&#039;');
+            }
+            
+            function renderAgentResponse(changes) {
+                var chatLog = document.getElementById('chat-log');
+                if (!chatLog) { return; }
+                if (agentResponseDiv) {
+                    agentResponseDiv.remove();
+                    agentResponseDiv = null;
+                }
+                if (!Array.isArray(changes) || changes.length === 0) {
+                    return;
+                }
+                agentResponseDiv = document.createElement('div');
+                agentResponseDiv.className = 'msg ai-msg';
+                var html = '<div style="font-weight:600;">' +
+                    '📝 Agent Response' +
+                '</div>';
+                changes.forEach(function(change) {
+                    var safePath = safeEscape(change.path || '');
+                    html += '<div style="' +
+                        'margin-top:10px;' +
+                        'font-size:11px;' +
+                        'opacity:0.8;' +
+                    '">' +
+                        safePath +
+                    '</div>';
+
+                    if (change.operation === 'modify' && typeof change.newContent === 'string') {
+                        html += '<div class="code-block-wrapper">' +
+                            '<button class="copy-btn">Copy</button>' +
+                            '<div class="code-container-scroll" ' +
+                                'style="max-height:120px;overflow-y:auto;overflow-x:auto;">' +
+                                '<pre>' +
+                                    '<code>' +
+                                        safeEscape(
+                                            change.newContent
+                                        ) +
+                                    '</code>' +
+                                '</pre>' +
+                            '</div>' +
+                        '</div>';
+                    }
+                });
+
+                agentResponseDiv.innerHTML = html;
+                chatLog.appendChild(agentResponseDiv);
+                attachAllCopyListeners();
+                attachCodeBlockScrollListeners();
+                scrollToBottom();
             }
             
             function renderApplyButton() {
@@ -1342,6 +1430,9 @@ export function getChatHtml(webviewUri: string): string {
                         }
                         break;
                     
+                    case 'agentResponse':
+                        renderAgentResponse(message.changes);
+                        break;
                     case "agentProgress":
                         setAgentButtonBusy(true);
                         updateAgentProgress(message.stage, message.text);

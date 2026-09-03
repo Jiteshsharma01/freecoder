@@ -1,4 +1,5 @@
-import { isFileDeletionRequest } from "../extension";
+import { isFileDeletionRequest } from "./requestClassifier";
+import { extractJsonObject } from "./changeGenerator";
 import { AgentContext, FileChange } from "./types";
 
 export interface AgentPlan {
@@ -43,6 +44,7 @@ export async function generateAgentPlan(
           content: prompt,
         },
       ],
+      format: "json",
       stream: false,
     }),
     signal,
@@ -78,7 +80,7 @@ export async function generateAgentPlan(
     );
   }
 
-  return normalizedPlan;
+  return validatedPlan;
 }
 
 function buildSystemPrompt(): string {
@@ -96,6 +98,11 @@ function buildSystemPrompt(): string {
     "Return ONLY valid JSON.",
     "Do not use markdown.",
     "Do not wrap the JSON in ``` fences.",
+    "Return ONLY the JSON object.",
+    "Do not write an introduction before the JSON.",
+    "Do not write an explanation after the JSON.",
+    "Do not describe your reasoning outside the JSON object.",
+    "Do not output plain text.",
     "",
     "GENERAL PLANNING RULES:",
     "1. Use the smallest safe set of files necessary.",
@@ -586,36 +593,36 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\.\/+/, "");
 }
 
-function isPlannedChange(value: unknown): boolean {
+function isPlannedChange(value: unknown): value is PlannedChange {
   if (!value || typeof value !== "object") {
     return false;
   }
 
   const change = value as Record<string, unknown>;
 
-  return (
-    typeof change.path === "string" &&
-    (change.operation === "create" ||
-      change.operation === "modify" ||
-      change.operation === "delete") &&
-    typeof change.reason === "string"
-  );
-}
-
-function extractJsonObject(rawText: string): string {
-  const cleaned = rawText
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  const start = cleaned.indexOf("{");
-
-  const end = cleaned.lastIndexOf("}");
-
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Could not find a JSON object in the AI response.");
+  if (typeof change.path !== "string") {
+    return false;
+  }
+  if (typeof change.reason !== "string") {
+    return false;
+  }
+  if (
+    change.operation !== "create" &&
+    change.operation !== "modify" &&
+    change.operation !== "delete" &&
+    change.operation !== "rename"
+  ) {
+    return false;
   }
 
-  return cleaned.slice(start, end + 1);
+  if (change.operation === "rename") {
+    if (
+      typeof change.originalPath !== "string" ||
+      typeof change.newPath !== "string"
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }

@@ -26,6 +26,7 @@ import {
 } from "./agent/virtualDiffProvider";
 import { ProjectAnalysis } from "./projectAnalysis/types";
 import { validateProject } from "./agent/validator";
+import { isFileDeletionRequest } from "./agent/requestClassifier";
 
 export function activate(context: vscode.ExtensionContext) {
   const diffProvider = new FreeCopilotDiffProvider();
@@ -301,50 +302,6 @@ function shouldUseProjectContext(text: string): boolean {
   return false;
 }
 
-export function isFileDeletionRequest(instruction: string): boolean {
-  const normalized = instruction.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-
-  /*
-   * Explicit filesystem deletion language.
-   *
-   * Examples:
-   *
-   * remove file logger.ts
-   * delete file test.tsx
-   * erase file config.json
-   */
-  if (
-    /\b(?:remove|delete|erase)\s+(?:the\s+)?(?:file|folder|directory)\b/i.test(
-      normalized,
-    )
-  ) {
-    return true;
-  }
-
-  /*
-   * Filename-based deletion.
-   *
-   * Examples:
-   *
-   * remove testFile.tsx
-   * delete logger.ts
-   *
-   * This intentionally requires something that looks like
-   * a filename rather than accepting "remove unused".
-   */
-  if (
-    /\b(?:remove|delete|erase)\s+[`"']?[A-Za-z0-9_$.-]+\.[A-Za-z0-9_-]+[`"']?/i.test(
-      normalized,
-    )
-  ) {
-    return true;
-  }
-  return false;
-}
-
 class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   // 1. Maintain a reference to the active AbortController to stop network streams
   private _activeAbortController: AbortController | null = null;
@@ -495,7 +452,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       const changes = await generateFileChanges(
         this._currentTask,
         rootPath,
-        this._agentAbortController.signal,
+        this._agentAbortController?.signal,
       );
 
       if (this._agentAbortController.signal.aborted) {
@@ -503,8 +460,17 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       }
 
       this._currentTask.changes = changes;
-
       this._currentTask.status = "diff";
+
+      this._webviewView?.webview.postMessage({
+        command: "agentResponse",
+        changes: changes.map((change) => ({
+          path: change.path,
+          operation: change.operation,
+          newContent: change.newContent,
+          explanation: change.explanation,
+        }),
+      )});
 
       // STEP 6
       this._webviewView?.webview.postMessage({
