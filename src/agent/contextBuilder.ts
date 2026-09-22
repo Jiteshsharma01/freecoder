@@ -6,6 +6,7 @@ import { ProjectAnalysis } from "../projectAnalysis/types";
 import { KnowledgeGraph } from "../projectAnalysis/knowledgeGraph/types";
 
 import { AgentContext, FileContext, ProjectReference } from "./types";
+import { AgentResolutionContext } from "./taskPlanner";
 
 export interface FileCandidateResult {
   requestedName: string;
@@ -17,8 +18,9 @@ export async function buildAgentContext(
   graph: KnowledgeGraph | null,
   analysis: ProjectAnalysis,
   instruction: string,
+  targetFiles: string[],
 ): Promise<AgentContext> {
-  const currentFile = await getActiveFileContext(rootPath);
+  const currentFile = await getActiveFileContext(rootPath, targetFiles);
 
   const relatedFiles = await getRelatedFileContexts(
     rootPath,
@@ -32,6 +34,7 @@ export async function buildAgentContext(
     instruction,
     analysis,
     rootPath,
+    // targetFiles,
   );
 
   const projectSummary = buildProjectSummary(analysis, projectReferences);
@@ -49,8 +52,95 @@ export async function buildAgentContext(
   };
 }
 
+export function findCandidateFilePaths(
+  instruction: string,
+  analysis: ProjectAnalysis,
+): string[] {
+  const candidates = new Set<string>();
+
+  const explicitFile = extractExplicitTargetFile(instruction);
+
+  /*
+   * If the user explicitly identified a file,
+   * that file is the strongest candidate.
+   */
+  if (explicitFile) {
+    const normalizedExplicit = normalizeProjectPath(explicitFile);
+
+    const exactMatch = analysis.files.find(
+      (file) => normalizeProjectPath(file.path) === normalizedExplicit,
+    );
+
+    if (exactMatch) {
+      candidates.add(normalizeProjectPath(exactMatch.path));
+
+      return [...candidates];
+    }
+  }
+
+  const fileNames = extractFileNames(instruction);
+
+  /*
+   * Only search actual filenames when the instruction
+   * contains a filename.
+   */
+  if (fileNames.size > 0) {
+    for (const file of analysis.files) {
+      if (fileNames.has(file.name.toLowerCase())) {
+        candidates.add(normalizeProjectPath(file.path));
+      }
+    }
+
+    return [...candidates];
+  }
+
+  /*
+   * No filename was specified.
+   *
+   * Do NOT dump project files here.
+   * The active file is only a candidate.
+   */
+  const editor = vscode.window.activeTextEditor;
+
+  if (editor && editor.document.uri.scheme === "file") {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(
+      editor.document.uri,
+    );
+
+    const activePath = workspaceFolder
+      ? vscode.workspace.asRelativePath(editor.document.uri, false)
+      : editor.document.fileName;
+
+    candidates.add(normalizeProjectPath(activePath));
+  }
+
+  return [...candidates];
+}
+
+function extractFileNames(instruction: string): Set<string> {
+  const names = new Set<string>();
+  const matches =
+    instruction.match(
+      /[A-Za-z0-9_$.-]+\.(?:tsx?|jsx?|mjs|cjs|php|css|scss|less|html|json|md)\b/gi,
+    ) ?? [];
+
+  for (const match of matches) {
+    const baseName = match
+      .split(/[\/\\]/)
+      .pop()
+      ?.trim();
+
+    if (baseName) {
+      names.add(baseName.toLowerCase());
+    }
+  }
+
+  return names;
+}
+
 async function getActiveFileContext(
   rootPath: string,
+  targetFiles: string[],
 ): Promise<FileContext | null> {
   const editor = vscode.window.activeTextEditor;
 
@@ -58,25 +148,59 @@ async function getActiveFileContext(
     return null;
   }
 
-  const document = editor.document;
-
-  if (document.uri.scheme !== "file") {
+  if (editor.document.uri.scheme !== "file") {
     return null;
   }
 
-  const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(
+    editor.document.uri,
+  );
 
   const relativePath = workspaceFolder
-    ? vscode.workspace.asRelativePath(document.uri, false)
-    : path.relative(rootPath, document.fileName).replace(/\\/g, "/");
+    ? vscode.workspace.asRelativePath(editor.document.uri, false)
+    : path.relative(rootPath, editor.document.fileName).replace(/\\/g, "/");
+
+  const normalizedActive = normalizeProjectPath(relativePath);
+
+  /*
+   * If a target file was explicitly resolved and the
+   * active file is not one of those targets, don't
+   * pretend the active editor is the target.
+   */
+  if (
+    targetFiles.length > 0 &&
+    !targetFiles.some(
+      (target) => normalizeProjectPath(target) === normalizedActive,
+    )
+  ) {
+    return null;
+  }
 
   return {
-    path: relativePath,
+    path: normalizedActive,
 
-    language: document.languageId,
+    language: editor.document.languageId,
 
-    content: buildFileContent(document, editor.selection),
+    content: buildFileContent(editor.document, editor.selection),
   };
+}
+
+function getActiveFilePath(rootPath: string): string | undefined {
+  const editor = vscode.window.activeTextEditor;
+
+  if (!editor || editor.document.uri.scheme !== "file") {
+    return undefined;
+  }
+
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(
+    editor.document.uri,
+  );
+
+  const relativePath = workspaceFolder
+    ? vscode.workspace.asRelativePath(editor.document.uri, false)
+    : path.relative(rootPath, editor.document.fileName).replace(/\\/g, "/");
+
+  return normalizeProjectPath(relativePath);
 }
 
 function buildFileContent(
@@ -253,15 +377,73 @@ function extractSearchTerms(instruction: string): string[] {
   if (renameMatch?.[1]) {
     terms.add(renameMatch[1]);
   }
+  if (renameMatch?.[2]) {
+    terms.add(renameMatch[2]);
+  }
 
   const identifierMatches =
-    instruction.match(/\b[A-Z][A-Za-z0-9_$]{2,}\b/g) ?? [];
+    instruction.match(/\b[A-Za-z_$][A-Za-z0-9_$]{2,}\b/g) ?? [];
 
   for (const match of identifierMatches) {
+    if (isCommonInstructionWord(match)) {
+      continue;
+    }
     terms.add(match);
   }
 
+  const fileMatches =
+    instruction.match(
+      /\b[A-Za-z0-9_$.-]+\.(?:tsx?|jsx?|mjs|cjs|php|css|scss|less|html|json|md)\b/gi,
+    ) ?? [];
+
+  for (const file of fileMatches) {
+    terms.add(file);
+  }
+
   return [...terms];
+}
+
+function extractExplicitTargetFile(instruction: string): string | null {
+  const match = instruction.match(
+    /\bin\s+(?:this\s+)?file\s*:\s*["']?(.+?)["']?\s*$/im,
+  );
+
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return normalizeProjectPath(match[1].trim());
+}
+
+function isCommonInstructionWord(value: string): boolean {
+  const words = new Set([
+    "add",
+    "remove",
+    "delete",
+    "update",
+    "change",
+    "modify",
+    "create",
+    "implement",
+    "make",
+    "write",
+    "use",
+    "this",
+    "that",
+    "file",
+    "project",
+    "component",
+    "function",
+    "class",
+    "with",
+    "from",
+    "into",
+    "everywhere",
+    "all",
+    "references",
+    "usages",
+  ]);
+  return words.has(value.toLowerCase());
 }
 
 function deduplicateReferences(
@@ -323,6 +505,53 @@ function buildProjectSummary(
   return lines.join("\n");
 }
 
+export async function buildAgentResolutionContext(
+  rootPath: string,
+  analysis: ProjectAnalysis,
+  instruction: string,
+): Promise<AgentResolutionContext> {
+  /*
+   * ---------------------------------------------------------
+   * 1. ACTIVE FILE
+   * ---------------------------------------------------------
+   *
+   * Only collect the path of the currently active file.
+   * Do NOT read its contents during resolution.
+   */
+  const activeFile = getActiveFilePath(rootPath);
+
+  /*
+   * ---------------------------------------------------------
+   * 2. EXPLICIT FILE
+   * ---------------------------------------------------------
+   *
+   * Example:
+   *
+   * "in this file:
+   *  apps\client\src\components\Header.tsx"
+   *
+   * This gives the resolver an explicit workspace target.
+   */
+  const explicitFile = extractExplicitTargetFile(instruction);
+
+  /*
+   * ---------------------------------------------------------
+   * 3. CANDIDATE FILES
+   * ---------------------------------------------------------
+   *
+   * This performs workspace-level filename discovery only.
+   *
+   * It does NOT inspect file contents.
+   */
+  const candidateFiles = findCandidateFilePaths(instruction, analysis);
+
+  return {
+    activeFile,
+    explicitFile: explicitFile ?? undefined,
+    candidateFiles,
+  };
+}
+
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\.\/+/, "");
 }
@@ -331,96 +560,8 @@ function normalizeProjectPath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\.\/+/, "");
 }
 
-function extractDeleteFileName(instruction: string): string | null {
-  const match = instruction.match(
-    /\b(?:remove|delete|erase)\s+(?:the\s+)?file\s+[`"']?([^`"'\s\/\\]+)[`"']?/i,
-  );
-  if (match?.[1]) {
-    return match[1].trim();
-  }
-  const fallback = instruction.match(
-    /\b(?:remove|delete|erase)\s+[`"']?([^`"'\s\/\\]+)[`"']?/i,
-  );
-  return fallback?.[1]?.trim() ?? null;
-}
-
 function containsIdentifier(line: string, identifier: string): boolean {
   const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(`\\b${escaped}\\b`);
   return pattern.test(line);
-}
-
-function looksLikeExplicitPath(value: string): boolean {
-  return value.includes("/") || value.includes("\\");
-}
-
-async function findFileCandidatesByName(
-  rootPath: string,
-  fileName: string,
-  analysis: ProjectAnalysis,
-): Promise<string[]> {
-  const normalizedName = fileName.trim().toLowerCase();
-
-  if (!normalizedName) {
-    return [];
-  }
-
-  return analysis.files
-    .filter((file) => file.name.toLowerCase() === normalizedName)
-    .map((file) => normalizeProjectPath(file.path))
-    .filter((filePath, index, all) => all.indexOf(filePath) === index);
-}
-
-async function resolveDeleteCandidates(
-  instruction: string,
-  analysis: ProjectAnalysis,
-): Promise<FileCandidateResult | null> {
-  const requestedName = extractDeleteFileName(instruction);
-
-  if (!requestedName) {
-    return null;
-  }
-
-  /*
-   * If the user supplied a path such as:
-   *
-   * src/utils/testFile.tsx
-   *
-   * don't treat it as a filename search.
-   *
-   * Let the exact path be resolved directly.
-   */
-  if (looksLikeExplicitPath(requestedName)) {
-    const normalizedPath = normalizeProjectPath(requestedName);
-
-    const exactMatch = analysis.files.some(
-      (file) => normalizeProjectPath(file.path) === normalizedPath,
-    );
-
-    return {
-      requestedName,
-      matches: exactMatch ? [normalizedPath] : [],
-    };
-  }
-
-  /*
-   * Filename-only request.
-   *
-   * Example:
-   *
-   * Remove testFile.tsx
-   *
-   * Search every known project file with that name.
-   */
-  const normalizedName = requestedName.toLowerCase().trim();
-
-  const matches = analysis.files
-    .filter((file) => file.name.toLowerCase() === normalizedName)
-    .map((file) => normalizeProjectPath(file.path))
-    .filter((filePath, index, all) => all.indexOf(filePath) === index);
-
-  return {
-    requestedName,
-    matches,
-  };
 }

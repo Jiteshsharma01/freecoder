@@ -35,6 +35,7 @@ export interface AgentContext {
   graphContext?: GraphContext;
   projectReferences?: ProjectReference[];
   selectedFilePath?: string;
+  candidateFiles?: string[];
 }
 
 export interface FileContext {

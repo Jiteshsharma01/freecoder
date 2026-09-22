@@ -7,28 +7,39 @@ export function getChatHtml(webviewUri: string): string {
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             * { margin: 0; }
-            body { font-family: sans-serif; padding: 10px; display: flex; flex-direction: column; height: 100vh; color: var(--vscode-editor-foreground); background-color: var(--vscode-sideBar-background); box-sizing: border-box; margin: 0; position: relative; }
-            select, button, textarea { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--vscode-dropdown-border); background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); box-sizing: border-box; }
+            body { font-family: sans-serif; padding: 10px; display: flex; flex-direction: column; height: 100vh; min-height: 0; overflow: hidden; color: var(--vscode-editor-foreground); background-color: var(--vscode-sideBar-background); box-sizing: border-box; margin: 0; position: relative; }
+            select, button, textarea { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--vscode-dropdown-border); background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); box-sizing: border-box; outline: none; }
             button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; cursor: pointer; width: fit-content; }
             button:hover { background: var(--vscode-button-hoverBackground); }
             #selection-box { display: flex; gap: 10px; }
             // #select-ai { display: flex; gap: 10px; }
             .btn-with-icon { display: flex; align-items: center; justify-content: center; gap: 8px; }
             /* Container positioning relative for arrow layout overlays */
-            #chat-container { flex-grow: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; margin-bottom: 8px; }
-            #chat-log { flex-grow: 1; overflow-y: auto; border: 1px solid var(--vscode-panel-border); padding: 8px; border-radius: 4px; background: var(--vscode-editor-background); font-size: 13px; }
+            #chat-container { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; margin-bottom: 8px; }
+            #chat-log { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 0px; background: var(--vscode-editor-background); font-size: 13px; }
             .msg { margin-bottom: 10px; padding: 6px; border-radius: 4px; }
-            .user-msg { background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-textBlockQuote-border); max-height: 150px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 11px; }
-            .ai-msg { background: var(--vscode-textCodeBlock-background); }
-            textarea { resize: none; min-height: 50px; max-height: 120px; overflow-y: auto; box-sizing: border-box; font-size: 12px; }
-            .submit-box { display: flex; gap: 5px; justify-content: flex-end; margin-top: 6px; }
-            #file-preview { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 5px; }
+            .user-msg { background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-textBlockQuote-border); max-height: 200px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 12px; }
+            .ai-msg { padding: 8px 0; }
+            #input-box { border: 1px solid #3b3a3a; border-radius: 8px; overflow: hidden; position: relative; flex-shrink: 0; }
+            textarea { resize: none; min-height: 70px; max-height: 400px; overflow-y: auto; box-sizing: border-box; display: block; border: none; padding: 8px; background: transparent; }
+            #input-box:focus-within { border: 1px solid #565656; }
+            #input-mode-row { cursor: pointer; display: flex; flex-direction: row; align-items: center; gap: 8px; width: fit-content; padding: 6px; }
+            #input-mode-row select { padding: 3px; font-size: 10px; border-radius: 20px; background: #595858c7; }
+
+            .submit-box { display: flex; gap: 5px; justify-content: flex-end; margin-top: 6px; flex-shrink: 0; }
+            #file-preview { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 5px; flex-shrink: 0; }
             .user-content { white-space: pre-wrap; font-family: monospace; }
             .stream-content { white-space: pre-wrap; font-family: monospace; }
-            .code-block-wrapper { position: relative; background: #1e1e1e; border-radius: 4px; margin: 8px 0; padding: 28px 8px 8px 8px; }
-            .code-container-scroll { max-height: 70px; overflow-y: auto; overflow-x: auto; }
-            .copy-btn { position: absolute; top: 4px; right: 4px; width: auto; padding: 2px 6px; font-size: 10px; background: rgba(255,255,255,0.1); color: #fff; z-index: 5; }
-            .copy-btn:hover { background: rgba(255,255,255,0.2); }
+            .code-block-wrapper { position: relative; background: #242424; border-radius: 4px; margin: 8px 0; padding: 0; overflow: hidden; }
+            .code-container-scroll { max-height: 200px; overflow-y: auto; overflow-x: auto; padding: 16px 6px 10px; border-right: 1px solid; border-left: 1px solid; border-bottom: 1px solid; border-color: #ffffff4a; }
+            .code-block-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; padding: 4px 0; }
+            .code-block-box1 { display: flex; align-items: center; gap: 8px; }
+            .code-block-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; opacity: 0.8; }
+            .copy-btn, .code-collapse-btn { width: auto; padding: 3px 6px; font-size: 10px; background: rgba(255,255,255,0.1); color: #fff; z-index: 5; font-size: 12px; }
+            .copy-btn:hover, .code-collapse-btn:hover { background: rgba(255,255,255,0.2); }
+            .code-collapse-btn, .code-action-btn { width: auto; padding: 2px 5px; background: transparent; border: none; font-size: 11px; opacity: 0.75; }
+            .code-collapse-btn:hover, .code-action-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+            .code-container-scroll { max-height: 120px; overflow-y: auto; overflow-x: auto; }
             pre { margin: 0; font-family: monospace; color: #d4d4d4; font-size: 12px; }
             /* Styled stop button */
             #stop-btn { background: var(--vscode-statusBarItem-errorBackground, #c74242); color: white; display: none; }
@@ -39,7 +50,7 @@ export function getChatHtml(webviewUri: string): string {
             #scroll-anchor:hover { background: var(--vscode-button-hoverBackground); opacity: 1; }
 
             /* Animated Loading Spinner Element */
-            .api-loading-dots { display: inline-flex; align-items: center; gap: 4px; padding: 8px 12px; background: var(--vscode-textCodeBlock-background); border-radius: 4px; margin-top: 5px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+            .api-loading-dots { display: inline-flex; align-items: center; gap: 4px; padding: 8px 12px; border-radius: 4px; margin-top: 5px; font-size: 12px; color: var(--vscode-descriptionForeground); }
             .loading-dot { width: 6px; height: 6px; background-color: var(--vscode-descriptionForeground); border-radius: 50%; animation: bounceDot 1.4s infinite ease-in-out both; }
             .loading-dot:nth-child(1) { animation-delay: -0.32s; }
             .loading-dot:nth-child(2) { animation-delay: -0.16s; }
@@ -47,16 +58,16 @@ export function getChatHtml(webviewUri: string): string {
 
             * { scrollbar-width: thin; scrollbar-color: var(--vscode-scrollbarSlider-background) transparent; }
             /* 2. Webkit-specific customization to perfectly style scrollbars across platforms */
-            #chat-log::-webkit-scrollbar, .code-container-scroll::-webkit-scrollbar, textarea::-webkit-scrollbar { width: 6px; height: 6px; }
+            #chat-log::-webkit-scrollbar, .code-container-scroll::-webkit-scrollbar, textarea::-webkit-scrollbar { display: none }
 
             /* Style the moving scrollbar handle using native VS Code theme colors */
-            #chat-log::-webkit-scrollbar-thumb, .code-container-scroll::-webkit-scrollbar-thumb, textarea::-webkit-scrollbar-thumb { background-color: var(--vscode-scrollbarSlider-background); border-radius: 10px; }
+            // #chat-log::-webkit-scrollbar-thumb, .code-container-scroll::-webkit-scrollbar-thumb, textarea::-webkit-scrollbar-thumb { background-color: var(--vscode-scrollbarSlider-background); border-radius: 10px; }
 
             /* Brighten the scrollbar handle slightly when hovered */
-            #chat-log::-webkit-scrollbar-thumb:hover, .code-container-scroll::-webkit-scrollbar-thumb:hover, textarea::-webkit-scrollbar-thumb:hover { background-color: var(--vscode-scrollbarSlider-hoverBackground); }
+            // #chat-log::-webkit-scrollbar-thumb:hover, .code-container-scroll::-webkit-scrollbar-thumb:hover, textarea::-webkit-scrollbar-thumb:hover { background-color: var(--vscode-scrollbarSlider-hoverBackground); }
 
             /* Keep the background track transparent so it looks completely seamless */
-            #chat-log::-webkit-scrollbar-track, .code-container-scroll::-webkit-scrollbar-track, textarea::-webkit-scrollbar-track { background: transparent; }
+            // #chat-log::-webkit-scrollbar-track, .code-container-scroll::-webkit-scrollbar-track, textarea::-webkit-scrollbar-track { background: transparent; }
         </style>
     </head>
     <body>
@@ -86,7 +97,20 @@ export function getChatHtml(webviewUri: string): string {
         <div id="file-preview">No file attached</div>
 
         <!-- 4. Input Controls -->
-        <textarea id="user-input" placeholder="Ask a question or request code..."></textarea>
+        <div id="input-box">
+            <textarea id="user-input" placeholder="Ask a question or request code..."></textarea>
+            <div id="input-mode-row">
+                <select id="input-mode" title="Select Mode">
+                    <option value="chat">💬 Chat</option>
+                    <option value="plan">📋 Plan</option>
+                    <option value="agent">✏️ Agent</option>
+                </select>
+                <span
+                    id="mode-info"
+                    title="Ask questions and get answers"
+                >ⓘ</span>
+            </div>
+        </div>
         <div class="submit-box">
             <button id="upload-trigger" style="width: 40px;">📎</button>
             <input type="file" id="file-input" style="display: none;" accept="image/*,.txt,.md,.json,.js,.ts" />
@@ -112,6 +136,14 @@ export function getChatHtml(webviewUri: string): string {
             let normalChatBusy = false;
             let isUserScrollingCodeBlock = false;
             let latestAgentValidation = null;
+            let agentClarificationDiv = null;
+            let currentMode = 'chat';
+
+            var MODE_INFO = {
+                chat: 'Ask questions and get answers',
+                plan: 'Create a step-by-step plan',
+                agent: 'Plan and modify project files'
+            };
 
             // Track scrolling state explicitly
             let isUserScrolledUp = false; 
@@ -156,12 +188,40 @@ export function getChatHtml(webviewUri: string): string {
                 var regex = new RegExp('\\x60\\x60\\x60(\\x5cw*)\\x0a([\\x5cs\\x5cS]*?)\\x60\\x60\\x60', 'g');
 
                 formatted = formatted.replace(regex, function(match, lang, code) {
-                    return '<div class="code-block-wrapper">' +
-                        '<button class="copy-btn">Copy</button>' +
-                        '<div class="code-container-scroll" style="max-height: 120px; overflow-y: auto; overflow-x: auto;">' +
-                            '<pre style="margin: 0; font-family: monospace; color: #d4d4d4; font-size: 12px;"><code>' + code.trim() + '</code></pre>' +
-                        '</div>' +
-                    '</div>';
+                    var blockLanguage = lang ? lang.toUpperCase() : 'CODE';
+                    return (
+                        '<div class="code-block-wrapper" data-code-collapsed="false">' +
+                            '<div class="code-block-header">' +
+                                '<div class="code-block-box1">' +
+                                    '<button ' +
+                                        'class="code-collapse-btn" ' +
+                                        'title="Collapse code"' +
+                                        'type="button"' +
+                                    '>' +
+                                        '⌵' +
+                                    '</button>' +
+                                    '<span class="code-block-label">' +
+                                        safeEscape(blockLanguage) +
+                                    '</span>' +
+                                '</div>' +
+                                '<button ' +
+                                    'class="code-action-btn copy-btn" ' +
+                                    'title="Copy code"' +
+                                    'type="button"' +
+                                '>' +
+                                    '⧉' +
+                                '</button>' +
+                                
+                            '</div>' +
+                            '<div class="code-container-scroll">' +
+                                '<pre>' +
+                                    '<code>' +
+                                        code.trim() +
+                                    '</code>' +
+                                '</pre>' +
+                            '</div>' +
+                        '</div>'
+                    );
                 });
 
                 // 3. HEADINGS
@@ -206,39 +266,274 @@ export function getChatHtml(webviewUri: string): string {
 
             // NEW: Clipboard Copy Hook binder supporting nested layout elements
             function attachAllCopyListeners() {
-                document.querySelectorAll('.copy-btn').forEach(btn => {
-                    if (btn.hasAttribute('data-hooked')) return;
-                    btn.setAttribute('data-hooked', 'true');
-                    btn.addEventListener('click', () => {
-                        const targetBox = btn.parentElement.querySelector('.code-container-scroll code');
-                        if (targetBox) {
-                            navigator.clipboard.writeText(targetBox.innerText);
-                            const originalText = btn.innerText;
-                            btn.innerText = 'Copied!';
-                            setTimeout(() => btn.innerText = originalText, 1500);
+                if (
+                    chatLog.hasAttribute(
+                        'data-copy-delegated'
+                    )
+                ) {
+                    return;
+                }
+
+                chatLog.setAttribute(
+                    'data-copy-delegated',
+                    'true'
+                );
+
+                chatLog.addEventListener(
+                    'click',
+                    function(event) {
+
+                        var target =
+                            event.target;
+
+                        if (
+                            !target ||
+                            !target.closest
+                        ) {
+                            return;
                         }
-                    });
-                });
+
+                        var button =
+                            target.closest(
+                                '.copy-btn'
+                            );
+
+                        if (!button) {
+                            return;
+                        }
+
+                        var wrapper =
+                            button.closest(
+                                '.code-block-wrapper'
+                            );
+
+                        if (!wrapper) {
+                            return;
+                        }
+
+                        var codeElement =
+                            wrapper.querySelector(
+                                '.code-container-scroll code'
+                            );
+
+                        if (!codeElement) {
+                            return;
+                        }
+
+                        navigator.clipboard.writeText(
+                            codeElement.innerText
+                        );
+
+                        var originalText =
+                            button.innerText;
+
+                        var originalTitle =
+                            button.title;
+
+                        button.innerText =
+                            '✓';
+
+                        button.title =
+                            'Copied';
+
+                        setTimeout(
+                            function() {
+                                /*
+                                * The button may have been replaced by
+                                * another streaming render, so first check
+                                * that it is still connected.
+                                */
+                                if (
+                                    !button.isConnected
+                                ) {
+                                    return;
+                                }
+
+                                button.innerText =
+                                    originalText;
+
+                                button.title =
+                                    originalTitle ||
+                                    'Copy code';
+                            },
+                            1200
+                        );
+                    }
+                );
+            }
+
+            function attachCodeBlockActionListeners() {
+                if (
+                    chatLog.hasAttribute(
+                        'data-collapse-delegated'
+                    )
+                ) {
+                    return;
+                }
+
+                chatLog.setAttribute(
+                    'data-collapse-delegated',
+                    'true'
+                );
+
+                chatLog.addEventListener(
+                    'click',
+                    function(event) {
+
+                        var target =
+                            event.target;
+
+                        if (
+                            !target ||
+                            !target.closest
+                        ) {
+                            return;
+                        }
+
+                        var button =
+                            target.closest(
+                                '.code-collapse-btn'
+                            );
+
+                        if (!button) {
+                            return;
+                        }
+
+                        var wrapper =
+                            button.closest(
+                                '.code-block-wrapper'
+                            );
+
+                        if (!wrapper) {
+                            return;
+                        }
+
+                        var codeContainer =
+                            wrapper.querySelector(
+                                '.code-container-scroll'
+                            );
+
+                        if (!codeContainer) {
+                            return;
+                        }
+
+                        var isCollapsed =
+                            wrapper.getAttribute(
+                                'data-code-collapsed'
+                            ) === 'true';
+
+                        if (isCollapsed) {
+
+                            wrapper.setAttribute(
+                                'data-code-collapsed',
+                                'false'
+                            );
+
+                            codeContainer.style.display =
+                                'block';
+
+                            button.innerText =
+                                '⌵';
+
+                            button.title =
+                                'Collapse code';
+
+                        } else {
+
+                            wrapper.setAttribute(
+                                'data-code-collapsed',
+                                'true'
+                            );
+
+                            codeContainer.style.display =
+                                'none';
+
+                            button.innerText = '⌵';
+                            button.title = 'Expand code';
+                            button.style.transform = 'rotate(270deg)';
+                        }
+                    }
+                );
             }
             
             function attachCodeBlockScrollListeners() {
-                document.querySelectorAll('.code-container-scroll').forEach(function(container) {
-                    if (container.hasAttribute('data-scroll-hooked')) {
-                        return;
-                    }
-                    container.setAttribute('data-scroll-hooked', 'true');
-                    container.addEventListener('wheel', function() {
-                        isUserScrollingCodeBlock = true;
-                    }, { passive: true });
+                document
+                    .querySelectorAll(
+                        '.code-container-scroll'
+                    )
+                    .forEach(
+                        function(container) {
 
-                    container.addEventListener('touchstart',function() {
-                        isUserScrollingCodeBlock = true;
-                    }, { passive: true });
-                    container.addEventListener('pointerdown', function() {
-                        isUserScrollingCodeBlock = true;
-                    });
-                });
+                            if (
+                                container.hasAttribute(
+                                    'data-scroll-hooked'
+                                )
+                            ) {
+                                return;
+                            }
+
+                            container.setAttribute(
+                                'data-scroll-hooked',
+                                'true'
+                            );
+
+                            container.addEventListener(
+                                'wheel',
+                                function() {
+                                    isUserScrollingCodeBlock =
+                                        true;
+                                },
+                                {
+                                    passive: true
+                                }
+                            );
+
+                            container.addEventListener(
+                                'touchstart',
+                                function() {
+                                    isUserScrollingCodeBlock =
+                                        true;
+                                },
+                                {
+                                    passive: true
+                                }
+                            );
+
+                            container.addEventListener(
+                                'pointerdown',
+                                function() {
+                                    isUserScrollingCodeBlock =
+                                        true;
+                                }
+                            );
+                        }
+                    );
             }
+
+            document.addEventListener(
+                'pointerup',
+                function() {
+                    setTimeout(
+                        function() {
+                            isUserScrollingCodeBlock =
+                                false;
+                        },
+                        300
+                    );
+                }
+            );
+            document.addEventListener(
+                'touchend',
+                function() {
+                    setTimeout(
+                        function() {
+                            isUserScrollingCodeBlock =
+                                false;
+                        },
+                        300
+                    );
+                }
+            );
 
             // Handle Map Generation Click
             document.getElementById('map-btn').addEventListener('click', () => {
@@ -372,6 +667,7 @@ export function getChatHtml(webviewUri: string): string {
                 chatLog.appendChild(agentResponseDiv);
                 attachAllCopyListeners();
                 attachCodeBlockScrollListeners();
+                attachCodeBlockActionListeners();
                 scrollToBottom();
             }
             
@@ -493,49 +789,71 @@ export function getChatHtml(webviewUri: string): string {
 
                 scrollToBottom();
             }
+            
+            function submitCurrentMode() {
+                var userInputEl = document.getElementById('user-input');
+                if (!userInputEl) return;
+                var text = userInputEl.value.trim();
+                if (!text && !base64Attachment) return;
 
-            const textarea = document.getElementById('user-input');
-            textarea.addEventListener('input', function () {
-                // If the user cleared the text, reset to default instantly
-                if (this.value.trim() === '') {
-                    this.style.height = DEFAULT_HEIGHT;
-                    return;
+                switch (currentMode) {
+                    case 'agent':
+                        submitAgentRequest();
+                        break;
+                    case 'plan':
+                        submitPlanRequest();
+                        break;
+                    case 'chat':
+                    default:
+                        submitChatRequest();
+                        break;
                 }
-                // Otherwise, handle dynamic growing up to your CSS max-height
-                this.style.height = 'auto';
-                this.style.height = this.scrollHeight + 'px';
-            });
+            }
 
-            document.getElementById('agent-btn').addEventListener('click', () => {
+            function submitPlanRequest() {
+                showAgentStatus('📋 Plan mode is not implemented yet.');
+            }
+
+            function submitAgentRequest() {
                 if (normalChatBusy) {
-                    showAgentStatus('⚠️ Stop the current AI generation before starting an Agent task.');
+                    showAgentStatus(
+                        '⚠️ Stop the current AI generation before starting an Agent task.'
+                    );
                     return;
                 }
                 var userInputEl = document.getElementById('user-input');
+                if (!userInputEl) { return; }
                 var text = userInputEl.value.trim();
                 if (!text) { return; }
-                removeAgentValidation();
                 setAgentButtonBusy(true);
+                removeAgentValidation();
                 var chatLog = document.getElementById('chat-log');
+                if (!chatLog) { return; }
+                var safeText = safeEscape(text);
 
                 chatLog.innerHTML +=
                     '<div class="msg user-msg">' +
                         '<b style="font-size: 13px;">You → Agent:</b>' +
-                        '<div class="user-content" style="white-space: pre-wrap; margin-top: 4px;">' +
-                            safeEscape(text) +
+                        '<div class="user-content" ' +
+                            'style="white-space: pre-wrap; margin-top: 4px;">' +
+                            safeText +
                         '</div>' +
                     '</div>';
+
                 scrollToBottom();
                 createAgentProgress();
                 updateAgentProgress('planning', 'Understanding your request...');
-                vscode.postMessage({command: 'agentRequest', message: text});
+                vscode.postMessage({
+                    command: 'agentRequest',
+                    message: text
+                });
                 userInputEl.value = '';
                 userInputEl.style.height = DEFAULT_HEIGHT;
-            });
+            }
 
-            // Send Prompt Pipeline
-            document.getElementById('send-btn').addEventListener('click', () => {
+            function submitChatRequest() {
                 const userInputEl = document.getElementById('user-input');
+                if (!userInputEl) { return; }
                 const text = userInputEl.value.trim();
                 const provider = document.getElementById('provider').value;
                 if (!text && !base64Attachment) return;
@@ -576,7 +894,229 @@ export function getChatHtml(webviewUri: string): string {
                 document.getElementById('file-preview').innerText = 'No file attached';
                 base64Attachment = null;
                 attachmentName = null;
+            }
+
+            const textarea = document.getElementById('user-input');
+            textarea.addEventListener('input', function () {
+                // If the user cleared the text, reset to default instantly
+                if (this.value.trim() === '') {
+                    this.style.height = DEFAULT_HEIGHT;
+                    return;
+                }
+                // Otherwise, handle dynamic growing up to your CSS max-height
+                this.style.height = 'auto';
+                this.style.height = this.scrollHeight + 'px';
             });
+
+            textarea.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    submitCurrentMode();
+                }
+            });
+
+            document.getElementById('agent-btn').addEventListener('click', function() {
+                currentMode = 'agent';
+                if (inputMode) {
+                    inputMode.value = 'agent';
+                }
+                submitAgentRequest();
+            });
+
+            // Send Prompt Pipeline
+            document.getElementById('send-btn').addEventListener('click', function() {
+                submitCurrentMode();
+            });
+
+            var inputMode = document.getElementById('input-mode');
+            var modeInfo = document.getElementById('mode-info');
+
+            if (inputMode) {
+                inputMode.value = currentMode;
+                if (modeInfo) {
+                    modeInfo.title = MODE_INFO[currentMode] || '';
+                }
+                inputMode.addEventListener('change', function() {
+                    currentMode = inputMode.value;
+                    if (modeInfo) {
+                        modeInfo.title = MODE_INFO[currentMode] || '';
+                    }
+                });
+            }
+
+            function renderAgentClarification(message, options, allowRewrite) {
+                var chatLog = document.getElementById('chat-log');
+                if (!chatLog) { return; }
+                // Remove an older clarification card.
+                if (agentClarificationDiv) {
+                    agentClarificationDiv.remove();
+                    agentClarificationDiv = null;
+                }
+                agentClarificationDiv = document.createElement('div');
+                agentClarificationDiv.className = 'msg ai-msg';
+                agentClarificationDiv.id = 'agent-clarification-card';
+
+                var safeMessage = safeEscape(message || 'Please clarify your request.');
+                var optionsHtml = '';
+
+                if (Array.isArray(options)) {
+                    options.forEach(function(option, index) {
+                        optionsHtml +=
+                            '<button ' +
+                                'class="agent-clarification-option" ' +
+                                'data-option-index="' +
+                                    index +
+                                '" ' +
+                                'style="' +
+                                    'display:block;' +
+                                    'width:100%;' +
+                                    'text-align:left;' +
+                                    'margin-top:6px;' +
+                                    'white-space:normal;' +
+                                    'word-break:break-word;' +
+                                '"' +
+                            '>' +
+                                safeEscape(
+                                    option.label
+                                ) +
+                            '</button>';
+                        }
+                    );
+                }
+
+                var rewriteHtml = allowRewrite
+                    ? (
+                        '<div style="margin-top:12px;">' +
+                            '<textarea ' +
+                                'id="agent-clarification-rewrite" ' +
+                                'placeholder="Rewrite the request more clearly..." ' +
+                                'style="' +
+                                    'width:100%;' +
+                                    'min-height:60px;' +
+                                    'resize:vertical;' +
+                                '"' +
+                            '></textarea>' +
+                            '<button ' +
+                                'id="agent-clarification-rewrite-btn" ' +
+                                'style="' +
+                                    'width:auto;' +
+                                    'margin-top:6px;' +
+                                '"' +
+                            '>' +
+                                'Rewrite & Retry' +
+                            '</button>' +
+
+                        '</div>'
+                    )
+                    : '';
+
+                agentClarificationDiv.innerHTML =
+                    '<div style="' +
+                        'font-weight:600;' +
+                        'font-size:13px;' +
+                    '">' +
+                        '❓ Agent Needs Clarification' +
+                    '</div>' +
+
+                    '<div style="' +
+                        'margin-top:7px;' +
+                        'font-size:12px;' +
+                        'line-height:1.5;' +
+                    '">' +
+                        safeMessage +
+                    '</div>' +
+
+                    '<div style="' +
+                        'margin-top:10px;' +
+                    '">' +
+                        optionsHtml +
+                    '</div>' +
+
+                    rewriteHtml;
+
+                chatLog.appendChild(agentClarificationDiv);
+
+                var optionButtons =
+                    agentClarificationDiv.querySelectorAll(
+                        '.agent-clarification-option'
+                    );
+
+                optionButtons.forEach(function(button) {
+                    button.addEventListener('click', function() {
+                        var index = Number(button.getAttribute('data-option-index'));
+                        var option = options[index];
+                        if (!option) return;
+
+                        optionButtons.forEach(
+                            function(otherButton) {
+                                otherButton.disabled = true;
+                                otherButton.style.opacity = '0.6';
+                                otherButton.style.cursor = 'not-allowed';
+                            }
+                        );
+
+                        if (agentClarificationDiv) {
+                            agentClarificationDiv.remove();
+                            agentClarificationDiv = null;
+                        }
+                        setAgentButtonBusy(true);
+                        vscode.postMessage({
+                            command: 'agentClarificationSelected',
+                            instruction: option.instruction
+                        });
+                    });
+                });
+
+                /*
+                * ---------------------------------------------------------
+                * REWRITE
+                * ---------------------------------------------------------
+                */
+                var rewriteButton =
+                    agentClarificationDiv.querySelector(
+                        '#agent-clarification-rewrite-btn'
+                    );
+
+                if (rewriteButton) {
+                    rewriteButton.addEventListener(
+                        'click',
+                        function() {
+                            var input =
+                                agentClarificationDiv.querySelector(
+                                    '#agent-clarification-rewrite'
+                                );
+
+                            var rewritten =
+                                input
+                                    ? input.value.trim()
+                                    : '';
+
+                            if (!rewritten) {
+                                return;
+                            }
+
+                            rewriteButton.disabled =
+                                true;
+
+                            rewriteButton.innerText =
+                                'Retrying...';
+
+                            rewriteButton.style.opacity =
+                                '0.6';
+
+                            vscode.postMessage({
+                                command:
+                                    'agentClarificationRewrite',
+
+                                instruction:
+                                    rewritten
+                            });
+                        }
+                    );
+                }
+
+                scrollToBottom();
+            }
 
             function renderAgentPlan(plan) {
                 var chatLog = document.getElementById('chat-log');
@@ -899,7 +1439,6 @@ export function getChatHtml(webviewUri: string): string {
                                             '</details>'
                                             : ''
                                     ) +
-
                                 '</div>';
                         }
                     );
@@ -1343,6 +1882,7 @@ export function getChatHtml(webviewUri: string): string {
             function setAgentButtonBusy(busy) {
                 var agentButton = document.getElementById('agent-btn');
                 var sendButton = document.getElementById('send-btn');
+                var modeSelect = document.getElementById('input-mode');
                 if (agentButton) {
                     agentButton.disabled = busy;
                     agentButton.style.opacity = busy ? '0.5' : '1';
@@ -1352,6 +1892,11 @@ export function getChatHtml(webviewUri: string): string {
                     sendButton.disabled = busy || normalChatBusy;
                     sendButton.style.opacity = (busy ||normalChatBusy) ? '0.5' : '1';
                     sendButton.style.cursor = (busy ||normalChatBusy) ? 'not-allowed' : 'pointer';
+                }
+                if (modeSelect) {
+                    modeSelect.disabled = busy;
+                    modeSelect.style.opacity = busy ? '0.6' : '1';
+                    modeSelect.style.cursor = busy ? 'not-allowed' : 'pointer';
                 }
             }
 
@@ -1382,33 +1927,159 @@ export function getChatHtml(webviewUri: string): string {
 
                     case 'appendStream':
                         if (currentStreamDiv) {
-                            // DESTROY EMBEDDED DOTS: The exact millisecond the first true token character arrives, remove the loader
-                            const embeddedLoader = currentStreamDiv.querySelector('#ai-embedded-loader');
+                            var embeddedLoader =
+                                currentStreamDiv.querySelector(
+                                    '#ai-embedded-loader'
+                                );
+
                             if (embeddedLoader) {
                                 embeddedLoader.remove();
                             }
-                            const codeContainers = currentStreamDiv.querySelectorAll('.code-container-scroll');
-                            const previousCodeScrollPositions = [];
-                            codeContainers.forEach(function(container, index) {
-                                previousCodeScrollPositions[index] = container.scrollTop;
-                            });
-                            currentResponseText += message.text;
-                            const contentSpan = currentStreamDiv.querySelector('.stream-content');
-                            if (!contentSpan) { return; }
-                            // Re-evaluate markdown and parse into a 70px scroll container
-                            contentSpan.innerHTML = formatMarkdownStream(currentResponseText);
-                            const newCodeContainers = currentStreamDiv.querySelectorAll('.code-container-scroll');
-                            newCodeContainers.forEach(function(container, index) {
-                                if (previousCodeScrollPositions[index] !== undefined) {
-                                    container.scrollTop = previousCodeScrollPositions[index];
+
+                            var oldCodeContainers =
+                                currentStreamDiv.querySelectorAll(
+                                    '.code-container-scroll'
+                                );
+
+                            var oldCodeWrappers =
+                                currentStreamDiv.querySelectorAll(
+                                    '.code-block-wrapper'
+                                );
+
+                            var previousCodeStates =
+                                [];
+
+                            oldCodeWrappers.forEach(
+                                function(wrapper, index) {
+
+                                    var container =
+                                        wrapper.querySelector(
+                                            '.code-container-scroll'
+                                        );
+
+                                    previousCodeStates[index] = {
+                                        collapsed:
+                                            wrapper.getAttribute(
+                                                'data-code-collapsed'
+                                            ) === 'true',
+
+                                        scrollTop:
+                                            container
+                                                ? container.scrollTop
+                                                : 0
+                                    };
                                 }
-                            });
+                            );
+
+                            currentResponseText +=
+                                message.text;
+
+                            var contentSpan =
+                                currentStreamDiv.querySelector(
+                                    '.stream-content'
+                                );
+
+                            if (!contentSpan) {
+                                return;
+                            }
+
+                            /*
+                            * Re-render Markdown.
+                            */
+                            contentSpan.innerHTML =
+                                formatMarkdownStream(
+                                    currentResponseText
+                                );
+
+                            /*
+                            * Restore code-block state.
+                            */
+                            var newCodeWrappers =
+                                currentStreamDiv.querySelectorAll(
+                                    '.code-block-wrapper'
+                                );
+
+                            newCodeWrappers.forEach(
+                                function(wrapper, index) {
+
+                                    var state =
+                                        previousCodeStates[index];
+
+                                    if (!state) {
+                                        return;
+                                    }
+
+                                    var container =
+                                        wrapper.querySelector(
+                                            '.code-container-scroll'
+                                        );
+
+                                    var collapseButton =
+                                        wrapper.querySelector(
+                                            '.code-collapse-btn'
+                                        );
+
+                                    if (
+                                        state.collapsed
+                                    ) {
+                                        wrapper.setAttribute(
+                                            'data-code-collapsed',
+                                            'true'
+                                        );
+
+                                        if (container) {
+                                            container.style.display =
+                                                'none';
+                                        }
+
+                                        if (collapseButton) {
+                                            collapseButton.innerText = '⌵';
+                                            collapseButton.title = 'Expand code';
+                                            collapseButton.style.transform = 'rotate(270deg)';
+                                        }
+
+                                    } else {
+                                        wrapper.setAttribute(
+                                            'data-code-collapsed',
+                                            'false'
+                                        );
+
+                                        if (container) {
+                                            container.style.display =
+                                                'block';
+
+                                            container.scrollTop =
+                                                state.scrollTop;
+                                        }
+
+                                        if (collapseButton) {
+                                            collapseButton.innerText =
+                                                '⌵';
+
+                                            collapseButton.title =
+                                                'Collapse code';
+                                        }
+                                    }
+                                }
+                            );
+
+                            /*
+                            * The listeners are delegated to chatLog, so these calls
+                            * are harmless after the first invocation.
+                            */
                             attachAllCopyListeners();
+                            attachCodeBlockActionListeners();
                             attachCodeBlockScrollListeners();
 
-                            // Smart scroll focus follow check
-                            if (!isUserScrolledUp) { chatLog.scrollTop = chatLog.scrollHeight; }
+                            if (
+                                !isUserScrolledUp &&
+                                !isUserScrollingCodeBlock
+                            ) {
+                                chatLog.scrollTop =
+                                    chatLog.scrollHeight;
+                            }
                         }
+
                         break;
                     case 'executeConfirmedClear':
                         // 1. Instantly send the stop command to kill any running background networks
@@ -1436,6 +2107,18 @@ export function getChatHtml(webviewUri: string): string {
                     case "agentProgress":
                         setAgentButtonBusy(true);
                         updateAgentProgress(message.stage, message.text);
+                        break;
+                    case 'agentClarification':
+                        setAgentButtonBusy(false);
+                        if (agentProgressDiv) {
+                            agentProgressDiv.remove();
+                            agentProgressDiv = null;
+                        }
+                        renderAgentClarification(
+                            message.message,
+                            message.options,
+                            message.allowRewrite !== false
+                        );
                         break;
 
                     case 'agentPlan':
@@ -1522,6 +2205,10 @@ export function getChatHtml(webviewUri: string): string {
                             agentReviewDiv.remove();
                             agentReviewDiv = null;
                         }
+                        if (agentClarificationDiv) {
+                            agentClarificationDiv.remove();
+                            agentClarificationDiv = null;
+                        }
                         removeAgentProgress();
                         break;
 
@@ -1547,6 +2234,7 @@ export function getChatHtml(webviewUri: string): string {
                         resetUIState();
                         chatLog.innerHTML += '<div><b>AI:</b> ' + formatMarkdownStream(message.text) + '</div>';
                         attachAllCopyListeners();
+                        attachCodeBlockActionListeners();
                         if (!isUserScrolledUp) scrollToBottom();
                         break;
                 }

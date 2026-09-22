@@ -12,7 +12,12 @@ import {
 } from "./projectContext/contextEngine";
 import { loadKnowledgeGraph } from "./projectAnalysis/knowledgeGraph/graphStorage";
 import { AgentTask } from "./agent/types";
-import { runAgentTask } from "./agent/agent";
+import {
+  createTaskId,
+  determineScope,
+  isAgentTask,
+  runAgentTask,
+} from "./agent/agent";
 import { generateFileChanges } from "./agent/changeGenerator";
 import { closeAgentDiffs, showAgentDiffs } from "./agent/diffPreview";
 import {
@@ -27,6 +32,11 @@ import {
 import { ProjectAnalysis } from "./projectAnalysis/types";
 import { validateProject } from "./agent/validator";
 import { isFileDeletionRequest } from "./agent/requestClassifier";
+import { generateAgentPlan, resolveAgentRequest } from "./agent/taskPlanner";
+import {
+  buildAgentContext,
+  buildAgentResolutionContext,
+} from "./agent/contextBuilder";
 
 export function activate(context: vscode.ExtensionContext) {
   const diffProvider = new FreeCopilotDiffProvider();
@@ -376,6 +386,24 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           await this.handleAgentRequest(instruction);
           break;
         }
+        case "agentClarificationSelected": {
+          const clarificationInstruction =
+            typeof data.instruction === "string" ? data.instruction.trim() : "";
+          if (!clarificationInstruction) {
+            break;
+          }
+          await this.handleAgentRequest(clarificationInstruction);
+          break;
+        }
+        case "agentClarificationRewrite": {
+          const rewrittenInstruction =
+            typeof data.instruction === "string" ? data.instruction.trim() : "";
+          if (!rewrittenInstruction) {
+            break;
+          }
+          await this.handleAgentRequest(rewrittenInstruction);
+          break;
+        }
         case "generateAgentChanges":
           await this.generateAgentChanges();
           break;
@@ -469,8 +497,8 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           operation: change.operation,
           newContent: change.newContent,
           explanation: change.explanation,
-        }),
-      )});
+        })),
+      });
 
       // STEP 6
       this._webviewView?.webview.postMessage({
@@ -705,7 +733,9 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
     // FILE ATTACHMENT CONTEXT
     let attachedFileContext = "";
-    const hasFileAttachment = Boolean(attachment && !attachmentType?.startsWith("image/"));
+    const hasFileAttachment = Boolean(
+      attachment && !attachmentType?.startsWith("image/"),
+    );
     if (hasFileAttachment) {
       attachedFileContext = [
         "",
@@ -889,7 +919,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
       this._webviewView?.webview.postMessage({
         command: "agentBusy",
-
         text: "An Agent task is already running. Complete or cancel it before starting another one.",
       });
 
@@ -898,11 +927,8 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
     /*
      * ---------------------------------------------------------
-     * 2. Prevent Agent from starting while normal AI chat is
-     *    still running.
-     *
-     *    This is primarily a UI guard, but keeping this check
-     *    in the extension host is safer.
+     * 2. Prevent Agent from starting while normal AI chat
+     *    is running.
      * ---------------------------------------------------------
      */
     if (this._activeAbortController) {
@@ -912,7 +938,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
       this._webviewView?.webview.postMessage({
         command: "agentBusy",
-
         text: "Stop the current AI generation before starting an Agent task.",
       });
 
@@ -925,11 +950,11 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    /*
-     * Keep the original user request untouched.
-     * We will only append resolved workspace context.
-     */
-    let agentInstruction = instruction;
+    const agentInstruction = instruction.trim();
+
+    if (!agentInstruction) {
+      return;
+    }
 
     try {
       /*
@@ -939,128 +964,113 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        */
       this._agentAbortController = new AbortController();
 
+      const signal = this._agentAbortController.signal;
+
       /*
        * -------------------------------------------------------
-       * 4. Initial Agent UI state.
+       * 4. Show Agent UI.
        * -------------------------------------------------------
        */
       this._webviewView?.show(true);
 
       this._webviewView?.webview.postMessage({
         command: "agentProgress",
-
         stage: "planning",
-
         text: "Understanding your request...",
       });
 
       /*
        * -------------------------------------------------------
-       * 5. Analyze project.
+       * 5. Analyze workspace.
+       *
+       * This gives the resolver factual information about
+       * the project and its files.
+       *
+       * IMPORTANT:
+       * No graph is loaded here.
+       * No related file contents are loaded here.
        * -------------------------------------------------------
        */
       const analysis = await analyzeProject(rootPath);
 
-      if (this._agentAbortController.signal.aborted) {
+      if (signal.aborted) {
         return;
       }
 
       /*
        * -------------------------------------------------------
-       * 6. Resolve destructive DELETE requests before
-       *    sending them to the LLM.
+       * 6. Build LIGHTWEIGHT resolution context.
        *
-       *    This is deterministic and prevents Qwen from
-       *    choosing between multiple files with the same name.
+       * This contains only:
+       * - active file path
+       * - explicit file path
+       * - candidate workspace files
+       *
+       * It intentionally does NOT contain:
+       * - full file contents
+       * - related file contents
+       * - graph context
+       * - project-wide references
        * -------------------------------------------------------
        */
-      const isDeleteRequest = isFileDeletionRequest(instruction);
+      const resolutionContext = await buildAgentResolutionContext(
+        rootPath,
+        analysis,
+        agentInstruction,
+      );
 
-      if (isDeleteRequest) {
-        const deleteResolution = resolveDeleteCandidates(instruction, analysis);
-
-        if (deleteResolution?.matches.length === 0) {
-          const message = `Could not find a file named "${deleteResolution.requestedName}" in the workspace.`;
-
-          vscode.window.showWarningMessage(message);
-
-          this._webviewView?.webview.postMessage({
-            command: "agentExecutionFailed",
-            text: message,
-          });
-
-          return;
-        }
-
-        if (deleteResolution && deleteResolution.matches.length > 1) {
-          /*
-           * Multiple files have the same filename.
-           *
-           * The user MUST decide which one is intended.
-           */
-          const selected = await vscode.window.showQuickPick(
-            deleteResolution.matches,
-            {
-              title: `Multiple files named "${deleteResolution.requestedName}" were found`,
-              placeHolder: "Select the file you want FreeCopilot to remove",
-              ignoreFocusOut: true,
-            },
-          );
-
-          /*
-           * User closed the QuickPick.
-           */
-          if (!selected) {
-            this._webviewView?.webview.postMessage({command: "agentExecutionCancelled"});
-            return;
-          }
-
-          /*
-           * Give the planner the exact path selected
-           * by the user.
-           */
-          agentInstruction = [
-            instruction,
-            "",
-            "================ RESOLVED DELETE TARGET ================",
-            `The user explicitly selected this file for deletion: ${selected}`,
-            "Use this exact workspace path.",
-            "Do not select another file with the same filename.",
-            "==========================================================",
-          ].join("\n");
-        } else if (deleteResolution && deleteResolution.matches.length === 1) {
-          /*
-           * One exact match.
-           *
-           * No dialog necessary.
-           */
-          const selected = deleteResolution.matches[0];
-
-          agentInstruction = [
-            instruction,
-            "",
-            "================ RESOLVED DELETE TARGET ================",
-            `Resolved workspace file: ${selected}`,
-            "Use this exact workspace path for the delete operation.",
-            "==========================================================",
-          ].join("\n");
-        }
-      }
-
-      if (this._agentAbortController.signal.aborted) {
+      if (signal.aborted) {
         return;
       }
 
       /*
        * -------------------------------------------------------
-       * 7. Load existing graph.
+       * 7. Let Qwen understand the request.
        * -------------------------------------------------------
        */
-      let graph = await loadKnowledgeGraph(rootPath);
+      const resolution = await resolveAgentRequest(
+        agentInstruction,
+        resolutionContext,
+        signal,
+      );
+
+      if (signal.aborted) {
+        return;
+      }
 
       /*
        * -------------------------------------------------------
-       * 8. Update progress.
+       * 8. CLARIFICATION
+       *
+       * If the request is ambiguous, stop the Agent flow here.
+       *
+       * Do NOT:
+       * - load the Knowledge Graph
+       * - read related files
+       * - search project references
+       * - create an AgentTask
+       * - generate an Agent plan
+       * -------------------------------------------------------
+       */
+      if (resolution.status === "clarification") {
+        this._webviewView?.webview.postMessage({
+          command: "agentClarification",
+
+          message: resolution.message ?? "Please clarify your request.",
+
+          options: resolution.options ?? [],
+
+          allowRewrite: resolution.allowRewrite !== false,
+        });
+
+        return;
+      }
+
+      /*
+       * -------------------------------------------------------
+       * 9. Request is clear.
+       *
+       * ONLY NOW load/generate the Knowledge Graph.
        * -------------------------------------------------------
        */
       this._webviewView?.webview.postMessage({
@@ -1068,25 +1078,49 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
         stage: "context",
 
-        text: "Reviewing current file and related files...",
+        text: "Reviewing relevant project context...",
       });
 
+      let graph = await loadKnowledgeGraph(rootPath);
+
+      if (signal.aborted) {
+        return;
+      }
+
       /*
-       * -------------------------------------------------------
-       * 9. Generate graph if it doesn't exist.
-       * -------------------------------------------------------
+       * Generate the graph only when one does not already exist.
        */
       if (!graph) {
         graph = await generateKnowledgeGraph(analysis);
       }
 
-      if (this._agentAbortController.signal.aborted) {
+      if (signal.aborted) {
         return;
       }
 
       /*
        * -------------------------------------------------------
-       * 10. Planning stage.
+       * 10. Build FULL Agent context.
+       *
+       * IMPORTANT:
+       * targetFiles comes from the request-resolution stage.
+       * -------------------------------------------------------
+       */
+      const context = await buildAgentContext(
+        rootPath,
+        graph,
+        analysis,
+        resolution.instruction,
+        resolution.targetFiles,
+      );
+
+      if (signal.aborted) {
+        return;
+      }
+
+      /*
+       * -------------------------------------------------------
+       * 11. Generate the actual Agent plan.
        * -------------------------------------------------------
        */
       this._webviewView?.webview.postMessage({
@@ -1097,28 +1131,81 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         text: "Creating the agent plan...",
       });
 
-      const task = await runAgentTask(
-        agentInstruction,
-        rootPath,
-        graph,
-        analysis,
-        this._agentAbortController.signal,
+      const plan = await generateAgentPlan(
+        resolution.instruction,
+        context,
+        signal,
       );
 
-      if (this._agentAbortController.signal.aborted) {
+      if (signal.aborted) {
         return;
       }
 
       /*
        * -------------------------------------------------------
-       * 11. Store the current task.
+       * 12. Safety boundary.
+       *
+       * The resolver already determined that the request was
+       * clear, but the planner is still allowed to request
+       * clarification if the richer context reveals ambiguity.
        * -------------------------------------------------------
        */
+      if (plan.status === "clarification") {
+        this._webviewView?.webview.postMessage({
+          command: "agentClarification",
+
+          message: plan.clarificationMessage ?? "Please clarify your request.",
+
+          options: plan.clarificationOptions ?? [],
+
+          allowRewrite: plan.allowRewrite !== false,
+        });
+
+        return;
+      }
+
+      /*
+       * -------------------------------------------------------
+       * 13. Create the AgentTask.
+       *
+       * The request is now resolved and the planner has produced
+       * a valid plan, so _currentTask can safely contain an
+       * AgentTask.
+       * -------------------------------------------------------
+       */
+      const task: AgentTask = {
+        id: createTaskId(),
+
+        instruction: resolution.instruction,
+
+        scope: determineScope(context),
+
+        currentFile: context.currentFile?.path,
+
+        targetFiles: plan.targetFiles,
+
+        context,
+
+        changes: plan.changes.map((change) => ({
+          path: change.path,
+
+          operation: change.operation,
+
+          originalPath: change.originalPath,
+
+          newPath: change.newPath,
+
+          explanation: change.reason,
+        })),
+
+        status: "review",
+      };
+
       this._currentTask = task;
 
       /*
        * -------------------------------------------------------
-       * 12. Wait for user approval of the plan.
+       * 14. Waiting for plan approval.
        * -------------------------------------------------------
        */
       this._webviewView?.webview.postMessage({
@@ -1136,7 +1223,9 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       });
     } catch (error: any) {
       /*
-       * An AbortError is an expected cancellation.
+       * -------------------------------------------------------
+       * Expected cancellation.
+       * -------------------------------------------------------
        */
       if (error?.name === "AbortError") {
         return;
@@ -1155,8 +1244,12 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       /*
        * Do NOT clear _currentTask here.
        *
-       * The task is needed after the planner finishes so
-       * Generate Changes can use it.
+       * The task is required by:
+       * - Generate Changes
+       * - Diff
+       * - Apply
+       * - Validation
+       * - Undo
        */
       this._agentAbortController = null;
     }
@@ -1333,6 +1426,21 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   }
 
   private isAgentBusy(): boolean {
+    /*
+     * An Agent request is already running even before an
+     * AgentTask has been created.
+     *
+     * This covers:
+     * - request resolution
+     * - project analysis
+     * - context building
+     * - plan generation
+     * - change generation
+     */
+    if (this._agentAbortController) {
+      return true;
+    }
+
     if (!this._currentTask) {
       return false;
     }
@@ -1350,18 +1458,63 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     if (!this.isAgentBusy()) {
       return;
     }
+
+    /*
+     * ---------------------------------------------------------
+     * 1. Abort the active Agent request immediately.
+     * ---------------------------------------------------------
+     */
     if (this._agentAbortController) {
       this._agentAbortController.abort();
       this._agentAbortController = null;
     }
+
+    /*
+     * ---------------------------------------------------------
+     * 2. Mark the task as cancelled.
+     * ---------------------------------------------------------
+     */
     if (this._currentTask) {
       this._currentTask.status = "cancelled";
     }
-    await closeAgentDiffs();
-    this._currentTask = undefined;
+
+    /*
+     * ---------------------------------------------------------
+     * 3. Tell the WebView immediately.
+     *
+     * IMPORTANT:
+     * Do this BEFORE waiting for diff cleanup.
+     * The UI should react immediately to Stop Agent.
+     * ---------------------------------------------------------
+     */
     this._webviewView?.webview.postMessage({
       command: "agentExecutionCancelled",
     });
+
+    /*
+     * ---------------------------------------------------------
+     * 4. Clear current Agent task state.
+     * ---------------------------------------------------------
+     */
+    this._currentTask = undefined;
+
+    /*
+     * ---------------------------------------------------------
+     * 5. Close any temporary Agent diff tabs.
+     *
+     * This can take some time, but the user has already
+     * received the cancellation state above.
+     * ---------------------------------------------------------
+     */
+    try {
+      await closeAgentDiffs();
+    } catch (error) {
+      console.warn(
+        "[FreeCopilot Agent] Failed to close Agent diff tabs after cancellation:",
+        error,
+      );
+    }
+
     vscode.window.showInformationMessage("FreeCopilot Agent stopped.");
   }
 }
