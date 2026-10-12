@@ -12,7 +12,6 @@ export function getChatHtml(webviewUri: string): string {
             button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; cursor: pointer; width: fit-content; }
             button:hover { background: var(--vscode-button-hoverBackground); }
             #selection-box { display: flex; gap: 10px; }
-            // #select-ai { display: flex; gap: 10px; }
             .btn-with-icon { display: flex; align-items: center; justify-content: center; gap: 8px; }
             /* Container positioning relative for arrow layout overlays */
             #chat-container { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; margin-bottom: 8px; }
@@ -20,27 +19,52 @@ export function getChatHtml(webviewUri: string): string {
             .msg { margin-bottom: 10px; padding: 6px; border-radius: 4px; }
             .user-msg { background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-textBlockQuote-border); max-height: 200px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 12px; }
             .ai-msg { padding: 8px 0; }
-            #input-box { border: 1px solid #3b3a3a; border-radius: 8px; overflow: hidden; position: relative; flex-shrink: 0; }
+            #input-box { border: 1px solid #3b3a3a; border-radius: 8px; overflow: visible; position: relative; flex-shrink: 0; }
             textarea { resize: none; min-height: 70px; max-height: 400px; overflow-y: auto; box-sizing: border-box; display: block; border: none; padding: 8px; background: transparent; }
             #input-box:focus-within { border: 1px solid #565656; }
             #input-mode-row { cursor: pointer; display: flex; flex-direction: row; align-items: center; gap: 8px; width: fit-content; padding: 6px; }
             #input-mode-row select { padding: 3px; font-size: 10px; border-radius: 20px; background: #595858c7; }
+            #model-select { width: auto; min-width: 90px; max-width: 150px; padding: 3px 8px; font-size: 10px; border-radius: 20px; background: #595858c7; color: var(--vscode-dropdown-foreground); border: none; cursor: pointer; }
+
+            #input-config-row { position: relative; display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 4px 6px 0; }
+            #main-config-btn { margin-left: auto; width: auto; padding: 3px 6px; font-size: 11px; border: none; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; }
+            #main-config-btn:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+            #main-config-menu { position: absolute; right: 0; bottom: calc(100% + 6px); width: 195px; padding: 7px; border: 1px solid var(--vscode-widget-border); border-radius: 8px; background: var(--vscode-editorWidget-background); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35); z-index: 1000; display: none; }
+            #main-config-menu.visible { display: block; }
+            .config-menu-header { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 6px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+            .config-menu-actions { display: flex; gap: 2px; }
+            .config-menu-item { width: 100%; padding: 7px 8px; border-radius: 4px; background: transparent; color: var(--vscode-foreground); border: none; text-align: left; font-size: 11px; }
+            .config-menu-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+            .config-menu-reload { margin-top: 3px; color: var(--vscode-descriptionForeground); }
+            .config-menu-reload:hover { background: var(--vscode-list-hoverBackground); }
+            .config-menu-shortcut { padding: 6px 8px 2px; color: var(--vscode-descriptionForeground); font-size: 10px; opacity: 0.8; }
 
             .submit-box { display: flex; gap: 5px; justify-content: flex-end; margin-top: 6px; flex-shrink: 0; }
             #file-preview { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 5px; flex-shrink: 0; }
             .user-content { white-space: pre-wrap; font-family: monospace; }
             .stream-content { white-space: pre-wrap; font-family: monospace; }
-            .code-block-wrapper { position: relative; background: #242424; border-radius: 4px; margin: 8px 0; padding: 0; overflow: hidden; }
-            .code-container-scroll { max-height: 200px; overflow-y: auto; overflow-x: auto; padding: 16px 6px 10px; border-right: 1px solid; border-left: 1px solid; border-bottom: 1px solid; border-color: #ffffff4a; }
-            .code-block-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; padding: 4px 0; }
+            .code-block-wrapper { position: relative; background: var(--vscode-editor-background); margin: 8px 0; padding: 0; overflow: hidden; }
+            .code-container-scroll { max-height: 300px; overflow-y: auto; overflow-x: auto; padding: 16px 6px 10px; border-radius: 0 0 5px 5px; border-right: 1px solid; border-left: 1px solid; border-bottom: 1px solid; border-color: #ffffff4a; background: var(--vscode-editor-background); }
+            .code-block-header { display: flex; align-items: center; justify-content: space-between; padding: 5px 4px 5px 2px; border-radius: 5px 5px 0 0; background: #373737; }
             .code-block-box1 { display: flex; align-items: center; gap: 8px; }
             .code-block-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; opacity: 0.8; }
             .copy-btn, .code-collapse-btn { width: auto; padding: 3px 6px; font-size: 10px; background: rgba(255,255,255,0.1); color: #fff; z-index: 5; font-size: 12px; }
             .copy-btn:hover, .code-collapse-btn:hover { background: rgba(255,255,255,0.2); }
             .code-collapse-btn, .code-action-btn { width: auto; padding: 2px 5px; background: transparent; border: none; font-size: 11px; opacity: 0.75; }
             .code-collapse-btn:hover, .code-action-btn:hover { opacity: 1; background: rgba(255,255,255,0.08); }
-            .code-container-scroll { max-height: 120px; overflow-y: auto; overflow-x: auto; }
-            pre { margin: 0; font-family: monospace; color: #d4d4d4; font-size: 12px; }
+            pre { margin: 0; font-family: var(--vscode-editor-font-family, Consolas, "Courier New", monospace); font-size: clamp(12px, var(--vscode-editor-font-size, 12px), 14px); line-height: 1.55; color: var(--vscode-editor-foreground); }
+            pre code { font-family: inherit; color: inherit; background: transparent; }
+
+            /* Syntax wise styles */
+            .tok-keyword { color: #569cd6; }
+            .tok-string { color: #ce9178; }
+            .tok-number { color: #b5cea8; }
+            .tok-comment { color: #6a9955; }
+            .tok-type { color: #4ec9b0; }
+            .tok-function { color: #dcdcaa; }
+            .tok-variable { color: #9cdcfe; }
+            .tok-property { color: #9cdcfe; }
+            .tok-operator { color: #d4d4d4; }
             /* Styled stop button */
             #stop-btn { background: var(--vscode-statusBarItem-errorBackground, #c74242); color: white; display: none; }
             #stop-btn:hover { background: #b03535; }
@@ -72,14 +96,6 @@ export function getChatHtml(webviewUri: string): string {
     </head>
     <body>
         <div id="selection-box">
-            <div id="select-ai">
-                <label for="provider">AI Provider Tool:</label>
-                <select id="provider">
-                    <option value="ollama-qwen3-local">Local Ollama (Qwen3-Coder:30b)</option>
-                    <option value="gemini">Gemini Flash (Free Tier)</option>
-                    <option value="huggingface">Hugging Face API</option>
-                </select>
-            </div>
             <div style="display: flex; gap: 6px; align-items: end;">
                 <button id="map-btn" class="btn-with-icon">🗺️ Map</button>
                 <button id="graph-btn" class="btn-with-icon">🕸️ Graph</button>
@@ -94,7 +110,36 @@ export function getChatHtml(webviewUri: string): string {
         </div>
 
         <!-- Attachment UI Display Area -->
-        <div id="file-preview">No file attached</div>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 2px 4px;">
+            <div id="file-preview">No file attached</div>
+            <div id="input-config-row">
+                <button
+                    id="main-config-btn"
+                    type="button"
+                    title="Open Main Config"
+                >
+                    Main Config ▼
+                </button>
+                <div id="main-config-menu">
+                    <div class="config-menu-header">
+                        Configs
+                    </div>
+                    <button
+                        class="config-menu-item active"
+                        type="button"
+                    >
+                        🖥️&nbsp;&nbsp;Main Config
+                    </button>
+                    <button
+                        id="main-config-reload"
+                        class="config-menu-item config-menu-reload"
+                        type="button"
+                    >
+                        ⟳&nbsp;&nbsp;Reload
+                    </button>
+                </div>
+            </div>
+        </div>
 
         <!-- 4. Input Controls -->
         <div id="input-box">
@@ -104,6 +149,9 @@ export function getChatHtml(webviewUri: string): string {
                     <option value="chat">💬 Chat</option>
                     <option value="plan">📋 Plan</option>
                     <option value="agent">✏️ Agent</option>
+                </select>
+                <select id="model-select" title="Select AI Model">
+                    <option value="">Loading models...</option>
                 </select>
                 <span
                     id="mode-info"
@@ -138,6 +186,8 @@ export function getChatHtml(webviewUri: string): string {
             let latestAgentValidation = null;
             let agentClarificationDiv = null;
             let currentMode = 'chat';
+            let selectedModelId = null;
+            let configuredModels = [];
 
             var MODE_INFO = {
                 chat: 'Ask questions and get answers',
@@ -175,6 +225,173 @@ export function getChatHtml(webviewUri: string): string {
 
             // Handle Anchor Arrow click interactions 
             if (scrollAnchor) scrollAnchor.addEventListener('click', scrollToBottom);
+
+            function highlightCode(code, language) {
+                var result = '';
+                var i = 0;
+                var normalizedLanguage = String(language || '').toLowerCase();
+
+                function unescapeHtml(value) {
+                    return String(value)
+                        .replace(/&lt;/g, '<')
+                        .replace(/&gt;/g, '>')
+                        .replace(/&quot;/g, '"')
+                        .replace(/&#039;/g, "'")
+                        .replace(/&amp;/g, '&');
+                }
+
+                code = unescapeHtml(code);
+
+                var isJavaScriptLike =
+                    normalizedLanguage === 'js' ||
+                    normalizedLanguage === 'jsx' ||
+                    normalizedLanguage === 'ts' ||
+                    normalizedLanguage === 'tsx' ||
+                    normalizedLanguage === 'javascript' ||
+                    normalizedLanguage === 'typescript' ||
+                    normalizedLanguage === 'react';
+
+                var keywords = new Set(['import', 'from', 'export', 'default', 'function', 'return', 'const', 'let', 'var', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'new', 'class', 'extends', 'implements', 'interface', 'type', 'enum', 'public', 'private', 'protected', 'readonly', 'async', 'await', 'try', 'catch', 'finally', 'throw', 'typeof', 'instanceof', 'in', 'of', 'as', 'satisfies', 'keyof', 'namespace', 'declare', 'abstract', 'static', 'get', 'set']);
+                var types = new Set(['string', 'number', 'boolean', 'void', 'unknown', 'any', 'never', 'object', 'null', 'undefined', 'ReactNode', 'ReactElement', 'Promise']);
+
+                function escape(value) {
+                    return String(value)
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#039;');
+                }
+
+                function token(className, value) {
+                    return (
+                        '<span class="' +
+                        className +
+                        '">' +
+                        escape(value) +
+                        '</span>'
+                    );
+                }
+
+                function isIdentifierStart(char) {
+                    return /[A-Za-z_$]/.test(char);
+                }
+
+                function isIdentifierPart(char) {
+                    return /[A-Za-z0-9_$]/.test(char);
+                }
+
+                if (!isJavaScriptLike) {
+                    return escape(code);
+                }
+
+                while (i < code.length) {
+                    var current = code[i];
+                    var next = code[i + 1];
+
+                    // Single-line comment
+                    if (current === '/' && next === '/') {
+                        var commentEnd = code.indexOf('\\n', i);
+                        if (commentEnd === -1) {
+                            commentEnd = code.length;
+                        }
+                        result += token('tok-comment', code.slice(i, commentEnd));
+                        i = commentEnd;
+                        continue;
+                    }
+
+                    // Multi-line comment
+                    if (current === '/' && next === '*') {
+                        var multiCommentEnd = code.indexOf('*/', i + 2);
+                        if (multiCommentEnd === -1) {
+                            multiCommentEnd = code.length - 2;
+                        }
+                        multiCommentEnd += 2;
+                        result += token('tok-comment', code.slice(i, multiCommentEnd));
+                        i = multiCommentEnd;
+                        continue;
+                    }
+
+                    // Strings
+                    if (
+                        current === "'" ||
+                        current === '"' ||
+                        current === String.fromCharCode(96)
+                    ) {
+                        var quote = current;
+                        var stringStart = i;
+                        var stringEnd = i + 1;
+
+                        while (stringEnd < code.length) {
+                            if (code[stringEnd] === '\\\\') {
+                                stringEnd += 2;
+                                continue;
+                            }
+                            if (code[stringEnd] === quote) {
+                                stringEnd++;
+                                break;
+                            }
+                            stringEnd++;
+                        }
+
+                        result += token('tok-string', code.slice(stringStart, stringEnd));
+                        i = stringEnd;
+                        continue;
+                    }
+
+                    // Numbers
+                    if (/[0-9]/.test(current)) {
+                        var numberMatch =
+                            code.slice(i).match(
+                                /^(?:0x[\\da-f]+|\\d+(?:\\.\\d+)?)/i
+                            );
+
+                        if (numberMatch) {
+                            result += token('tok-number', numberMatch[0]);
+                            i += numberMatch[0].length;
+                            continue;
+                        }
+                    }
+
+                    // Identifiers / keywords / types / functions
+                    if (isIdentifierStart(current)) {
+                        var identifierStart = i;
+                        i++;
+
+                        while (i < code.length && isIdentifierPart(code[i])) {
+                            i++;
+                        }
+
+                        var identifier = code.slice(identifierStart, i);
+                        if (keywords.has(identifier)) {
+                            result += token('tok-keyword', identifier);
+                            continue;
+                        }
+                        if (types.has(identifier)) {
+                            result += token('tok-type', identifier);
+                            continue;
+                        }
+
+                        var remaining = code.slice(i);
+                        var nextNonSpace = remaining.match(/^\\s*/);
+                        var afterWhitespace = i + (nextNonSpace ? nextNonSpace[0].length : 0);
+
+                        if (code[afterWhitespace] === '(') {
+                            result += token('tok-function', identifier);
+                            continue;
+                        }
+                        if (/^[A-Z]/.test(identifier)) {
+                            result += token('tok-type', identifier);
+                            continue;
+                        }
+                        result += token('tok-variable', identifier);
+                        continue;
+                    }
+                    result += escape(current);
+                    i++;
+                }
+                return result;
+            }
 
             // NEW: Isolated Markdown Markdown Stream Formatter with a strict 70px height limit
             function formatMarkdownStream(rawText) {
@@ -216,7 +433,7 @@ export function getChatHtml(webviewUri: string): string {
                             '<div class="code-container-scroll">' +
                                 '<pre>' +
                                     '<code>' +
-                                        code.trim() +
+                                        highlightCode(code.trim(), lang) +
                                     '</code>' +
                                 '</pre>' +
                             '</div>' +
@@ -590,13 +807,25 @@ export function getChatHtml(webviewUri: string): string {
             });
 
             function resetUIState() {
-                document.getElementById('send-btn').style.display = 'block';
-                document.getElementById('stop-btn').style.display = 'none';
-                document.getElementById('user-input').disabled = false;
-                document.getElementById('provider').disabled = false;
+                var sendButton = document.getElementById('send-btn');
+                var stopButton = document.getElementById('stop-btn');
+                var userInput = document.getElementById('user-input');
+                var modelSelect = document.getElementById('model-select');
+                if (sendButton) {
+                    sendButton.style.display = 'block';
+                }
+                if (stopButton) {
+                    stopButton.style.display = 'none';
+                }
+                if (userInput) {
+                    userInput.disabled = false;
+                }
+                if (modelSelect) {
+                    modelSelect.disabled = false;
+                    modelSelect.style.opacity = '1';
+                }
                 normalChatBusy = false;
-                // Clean up any loose embedded loader nodes
-                const activeLoader = document.getElementById('ai-embedded-loader');
+                var activeLoader = document.getElementById('ai-embedded-loader');
                 if (activeLoader) activeLoader.remove();
             }
             
@@ -789,6 +1018,142 @@ export function getChatHtml(webviewUri: string): string {
 
                 scrollToBottom();
             }
+
+            function renderConfiguredModels(
+                models,
+                selectedId
+            ) {
+                var modelSelect = document.getElementById('model-select');
+                if (!modelSelect) { return; }
+                configuredModels = Array.isArray(models) ? models : [];
+
+                var chatModels =
+                    configuredModels.filter(
+                        function(model) {
+                            return (
+                                Array.isArray(model.roles) &&
+                                model.roles.includes('chat')
+                            );
+                        }
+                    );
+
+                modelSelect.innerHTML = '';
+
+                if (chatModels.length === 0) {
+                    var emptyOption = document.createElement('option');
+                    emptyOption.value = '';
+                    emptyOption.textContent = 'No Chat models configured';
+                    modelSelect.appendChild(emptyOption);
+                    selectedModelId = null;
+                    return;
+                }
+
+                chatModels.forEach(
+                    function(model) {
+                        var option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = model.name;
+                        modelSelect.appendChild(option);
+                    }
+                );
+
+                var requestedId = selectedId || selectedModelId;
+                var selectedModel =
+                    chatModels.find(
+                        function(model) {
+                            return (model.id === requestedId);
+                        }
+                    );
+
+                if (!selectedModel) {
+                    selectedModel = chatModels[0];
+                }
+
+                selectedModelId = selectedModel.id;
+                modelSelect.value = selectedModel.id;
+            }
+
+            function updateModelSelectorForMode() {
+                if (!modelSelect) {
+                    return;
+                }
+                var previousSelectedModelId = selectedModelId;
+                var requiredRoles = [];
+
+                if (currentMode === 'chat') {
+                    requiredRoles = ['chat'];
+                } else if (currentMode === 'plan') {
+                    requiredRoles = ['planner'];
+                } else if (currentMode === 'agent') {
+                    requiredRoles = ['resolver'];
+                    // requiredRoles = ['resolver', 'planner', 'changeGenerator'];
+                } else {
+                    requiredRoles = ['chat'];
+                }
+
+                var modeModels = configuredModels.filter(
+                    function(model) {
+                        return (
+                            Array.isArray(model.roles) &&
+                            requiredRoles.every(
+                                function(role) {
+                                    return model.roles.includes(role);
+                                }
+                            )
+                        );
+                    }
+                );
+
+                modelSelect.innerHTML = '';
+
+                if (modeModels.length === 0) {
+                    var emptyOption = document.createElement('option');
+
+                    emptyOption.value = '';
+                    emptyOption.textContent = 'No models available';
+                    modelSelect.appendChild(emptyOption);
+                    selectedModelId = null;
+                    modelSelect.disabled = true;
+                    modelSelect.style.opacity = '0.55';
+                    modelSelect.style.cursor = 'not-allowed';
+                    return;
+                }
+
+                modeModels.forEach(
+                    function(model) {
+                        var option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = model.name;
+                        modelSelect.appendChild(option);
+                    }
+                );
+
+                var selectedModel =
+                    modeModels.find(
+                        function(model) {
+                            return model.id === selectedModelId;
+                        }
+                    );
+
+                if (!selectedModel) {
+                    selectedModel = modeModels[0];
+                }
+
+                selectedModelId = selectedModel.id;
+                modelSelect.value = selectedModel.id;
+
+                modelSelect.disabled = false;
+                modelSelect.style.opacity = '1';
+                modelSelect.style.cursor = 'pointer';
+
+                if (selectedModelId !== previousSelectedModelId) {
+                    vscode.postMessage({
+                        command: 'selectModel',
+                        modelId: selectedModelId
+                    });
+                }
+                updateModelSelectorForMode();
+            }
             
             function submitCurrentMode() {
                 var userInputEl = document.getElementById('user-input');
@@ -825,6 +1190,12 @@ export function getChatHtml(webviewUri: string): string {
                 if (!userInputEl) { return; }
                 var text = userInputEl.value.trim();
                 if (!text) { return; }
+                if (!selectedModelId) {
+                    showAgentStatus(
+                        'No compatible Agent model is configured. Check the model roles in Main Config.'
+                    );
+                    return;
+                }
                 setAgentButtonBusy(true);
                 removeAgentValidation();
                 var chatLog = document.getElementById('chat-log');
@@ -845,7 +1216,8 @@ export function getChatHtml(webviewUri: string): string {
                 updateAgentProgress('planning', 'Understanding your request...');
                 vscode.postMessage({
                     command: 'agentRequest',
-                    message: text
+                    message: text,
+                    modelId: selectedModelId
                 });
                 userInputEl.value = '';
                 userInputEl.style.height = DEFAULT_HEIGHT;
@@ -855,7 +1227,6 @@ export function getChatHtml(webviewUri: string): string {
                 const userInputEl = document.getElementById('user-input');
                 if (!userInputEl) { return; }
                 const text = userInputEl.value.trim();
-                const provider = document.getElementById('provider').value;
                 if (!text && !base64Attachment) return;
 
                 normalChatBusy = true;
@@ -863,7 +1234,9 @@ export function getChatHtml(webviewUri: string): string {
                 document.getElementById('send-btn').style.display = 'none';
                 document.getElementById('stop-btn').style.display = 'block';
                 userInputEl.disabled = true;
-                document.getElementById('provider').disabled = true;
+                if (modelSelect) {
+                    modelSelect.disabled = true;
+                }
 
                 const chatLog = document.getElementById('chat-log');
                 const safeText = safeEscape(text);
@@ -881,7 +1254,6 @@ export function getChatHtml(webviewUri: string): string {
                 vscode.postMessage({
                     command: 'sendMessage',
                     text: text, 
-                    provider: provider,
                     attachment: base64Attachment,
                     attachmentType: document.getElementById('file-input').files[0]?.type || null
                 });
@@ -920,6 +1292,7 @@ export function getChatHtml(webviewUri: string): string {
                 if (inputMode) {
                     inputMode.value = 'agent';
                 }
+                updateModelSelectorForMode();
                 submitAgentRequest();
             });
 
@@ -929,7 +1302,53 @@ export function getChatHtml(webviewUri: string): string {
             });
 
             var inputMode = document.getElementById('input-mode');
+            var modelSelect = document.getElementById('model-select');
             var modeInfo = document.getElementById('mode-info');
+
+            var mainConfigBtn = document.getElementById('main-config-btn');
+            var mainConfigMenu = document.getElementById('main-config-menu');
+            var mainConfigReload = document.getElementById('main-config-reload');
+            var mainConfigItem = document.querySelector('#main-config-menu .config-menu-item.active');
+
+            if (mainConfigBtn && mainConfigMenu) {
+                mainConfigBtn.addEventListener('click', function(event) {
+                    event.stopPropagation();
+                    mainConfigMenu.classList.toggle('visible');
+                });
+            }
+
+            if (mainConfigMenu) {
+                mainConfigMenu.addEventListener('click', function(event) {
+                    event.stopPropagation();
+                });
+            }
+
+            document.addEventListener('click', function() {
+                if (mainConfigMenu) {
+                    mainConfigMenu.classList.remove('visible');
+                }
+            });
+
+            if (mainConfigItem) {
+                mainConfigItem.addEventListener('click', function() {
+                    vscode.postMessage({
+                        command: 'openMainConfig'
+                    });
+                    if (mainConfigMenu) {
+                        mainConfigMenu.classList.remove('visible');
+                    }
+                });
+            }
+            if (mainConfigReload) {
+                mainConfigReload.addEventListener('click', function() {
+                    vscode.postMessage({
+                        command: 'reloadConfig'
+                    });
+                    if (mainConfigMenu) {
+                        mainConfigMenu.classList.remove('visible');
+                    }
+                });
+            }
 
             if (inputMode) {
                 inputMode.value = currentMode;
@@ -941,6 +1360,19 @@ export function getChatHtml(webviewUri: string): string {
                     if (modeInfo) {
                         modeInfo.title = MODE_INFO[currentMode] || '';
                     }
+                    updateModelSelectorForMode();
+                });
+            }
+            updateModelSelectorForMode();
+
+            if (modelSelect) {
+                modelSelect.addEventListener('change', function() {
+                    selectedModelId = modelSelect.value;
+                    if (!selectedModelId) { return; }
+                    vscode.postMessage({
+                        command: 'selectModel',
+                        modelId: selectedModelId
+                    });
                 });
             }
 
@@ -1062,7 +1494,8 @@ export function getChatHtml(webviewUri: string): string {
                         setAgentButtonBusy(true);
                         vscode.postMessage({
                             command: 'agentClarificationSelected',
-                            instruction: option.instruction
+                            instruction: option.instruction,
+                            modelId: selectedModelId
                         });
                     });
                 });
@@ -1105,11 +1538,9 @@ export function getChatHtml(webviewUri: string): string {
                                 '0.6';
 
                             vscode.postMessage({
-                                command:
-                                    'agentClarificationRewrite',
-
-                                instruction:
-                                    rewritten
+                                command: 'agentClarificationRewrite',
+                                instruction: rewritten,
+                                modelId: selectedModelId
                             });
                         }
                     );
@@ -1905,6 +2336,20 @@ export function getChatHtml(webviewUri: string): string {
                 const message = event.data;
 
                 switch (message.command) {
+                    case 'configuredModels':
+                        renderConfiguredModels(
+                            message.models,
+                            message.selectedModelId
+                        );
+                        break;
+                    case 'modelSelected':
+                        if (message.model && message.model.id) {
+                            selectedModelId = message.model.id;
+                            if (modelSelect) {
+                                modelSelect.value = message.model.id;
+                            }
+                        }
+                        break;
                     case 'startStream':
                         // Show Stop Button, Hide Send Button
                         document.getElementById('send-btn').style.display = 'none';

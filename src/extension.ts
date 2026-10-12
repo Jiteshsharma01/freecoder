@@ -11,7 +11,7 @@ import {
   formatProjectContextForAI,
 } from "./projectContext/contextEngine";
 import { loadKnowledgeGraph } from "./projectAnalysis/knowledgeGraph/graphStorage";
-import { AgentTask } from "./agent/types";
+import { AgentModelSnapshot, AgentTask } from "./agent/types";
 import {
   createTaskId,
   determineScope,
@@ -37,6 +37,13 @@ import {
   buildAgentContext,
   buildAgentResolutionContext,
 } from "./agent/contextBuilder";
+import {
+  ensureFreeCopilotConfig,
+  getFreeCopilotModelId,
+  loadFreeCopilotConfig,
+  FREECOPILOT_CONFIG_FILE,
+  FreeCopilotModel,
+} from "./config/modelConfig";
 
 export function activate(context: vscode.ExtensionContext) {
   const diffProvider = new FreeCopilotDiffProvider();
@@ -101,7 +108,18 @@ export function activate(context: vscode.ExtensionContext) {
   const chatProvider = new FreeCopilotViewProvider(
     context.extensionUri,
     diffProvider,
+    context,
   );
+  const configSaveListener = vscode.workspace.onDidSaveTextDocument(
+    async (document) => {
+      if (document.uri.fsPath !== FREECOPILOT_CONFIG_FILE) {
+        return;
+      }
+      await chatProvider.refreshConfiguredModels();
+    },
+  );
+
+  context.subscriptions.push(configSaveListener);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       "freeCopilot.chatView",
@@ -313,6 +331,10 @@ function shouldUseProjectContext(text: string): boolean {
 }
 
 class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
+  private static readonly SELECTED_MODEL_STATE_KEY =
+    "freecopilot.selectedModelId";
+  private static readonly ACTIVE_CONFIG_STATE_KEY =
+    "freecopilot.activeConfigPath";
   // 1. Maintain a reference to the active AbortController to stop network streams
   private _activeAbortController: AbortController | null = null;
   private _agentAbortController: AbortController | null = null;
@@ -322,6 +344,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly _extensionUri: vscode.Uri,
     private readonly _diffProvider: FreeCopilotDiffProvider,
+    private readonly _extensionContext: vscode.ExtensionContext,
   ) {}
 
   public resolveWebviewView(
@@ -337,6 +360,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.description = "Local Code Assistant";
     webviewView.webview.html = getChatHtml("");
+    void this.sendConfiguredModels();
 
     // Intercept incoming interface pipeline events
     webviewView.webview.onDidReceiveMessage(async (data) => {
@@ -380,10 +404,15 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           console.log("AGENT REQUEST CASE HIT:", data.message);
           const instruction =
             typeof data.message === "string" ? data.message.trim() : "";
+          const modelId =
+            typeof data.modelId === "string" && data.modelId.trim()
+              ? data.modelId.trim()
+              : undefined;
+
           if (!instruction) {
             break;
           }
-          await this.handleAgentRequest(instruction);
+          await this.handleAgentRequest(instruction, modelId);
           break;
         }
         case "agentClarificationSelected": {
@@ -392,7 +421,11 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           if (!clarificationInstruction) {
             break;
           }
-          await this.handleAgentRequest(clarificationInstruction);
+          const modelId =
+            typeof data.modelId === "string" && data.modelId.trim()
+              ? data.modelId.trim()
+              : undefined;
+          await this.handleAgentRequest(clarificationInstruction, modelId);
           break;
         }
         case "agentClarificationRewrite": {
@@ -401,7 +434,45 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           if (!rewrittenInstruction) {
             break;
           }
-          await this.handleAgentRequest(rewrittenInstruction);
+          const modelId =
+            typeof data.modelId === "string" && data.modelId.trim()
+              ? data.modelId.trim()
+              : undefined;
+          await this.handleAgentRequest(rewrittenInstruction, modelId);
+          break;
+        }
+        case "openMainConfig": {
+          await this.openMainConfig();
+          break;
+        }
+        case "reloadConfig": {
+          try {
+            await this.sendConfiguredModels();
+          } catch (error: any) {
+            webviewView.webview.postMessage({
+              command: "showError",
+              text: error?.message ?? "Failed to reload configuration.",
+            });
+          }
+          break;
+        }
+        case "selectModel": {
+          try {
+            const modelId =
+              typeof data.modelId === "string" ? data.modelId.trim() : "";
+
+            if (!modelId) {
+              break;
+            }
+
+            await this.selectModel(modelId);
+          } catch (error: any) {
+            webviewView.webview.postMessage({
+              command: "showError",
+              text: error?.message ?? "Failed to select the configured model.",
+            });
+          }
+
           break;
         }
         case "generateAgentChanges":
@@ -446,6 +517,39 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         }
       }
     });
+  }
+
+  private getActiveConfigPath(): string {
+    return (
+      this._extensionContext.globalState.get<string>(
+        FreeCopilotViewProvider.ACTIVE_CONFIG_STATE_KEY,
+      ) ?? FREECOPILOT_CONFIG_FILE
+    );
+  }
+
+  private async setActiveConfig(configPath: string): Promise<void> {
+    await this._extensionContext.globalState.update(
+      FreeCopilotViewProvider.ACTIVE_CONFIG_STATE_KEY,
+      configPath,
+    );
+  }
+
+  private async openMainConfig(): Promise<void> {
+    try {
+      await ensureFreeCopilotConfig();
+
+      const document = await vscode.workspace.openTextDocument(
+        vscode.Uri.file(FREECOPILOT_CONFIG_FILE),
+      );
+
+      await vscode.window.showTextDocument(document, {
+        preview: false,
+      });
+    } catch (error: any) {
+      vscode.window.showErrorMessage(
+        `Failed to open Main Config: ${error?.message ?? "Unknown error"}`,
+      );
+    }
   }
 
   private async generateAgentChanges(): Promise<void> {
@@ -717,15 +821,169 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private async getSelectedModel(
+    role:
+      | "chat"
+      | "edit"
+      | "apply"
+      | "resolver"
+      | "planner"
+      | "changeGenerator"
+      | "embed",
+    requestedModelId?: string,
+  ): Promise<FreeCopilotModel> {
+    const config = await loadFreeCopilotConfig();
+
+    const selectedModelId =
+      requestedModelId ??
+      this._extensionContext.globalState.get<string>(
+        FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+      );
+
+    if (selectedModelId) {
+      const selectedModel = config.models.find(
+        (model) => getFreeCopilotModelId(model) === selectedModelId,
+      );
+
+      if (selectedModel) {
+        if (selectedModel.roles?.includes(role)) {
+          return selectedModel;
+        }
+
+        throw new Error(
+          `The selected model "${selectedModel.name}" does not support the "${role}" role.`,
+        );
+      }
+    }
+
+    const fallbackModel = config.models.find((model) =>
+      model.roles?.includes(role),
+    );
+
+    if (!fallbackModel) {
+      throw new Error(
+        `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
+      );
+    }
+
+    return fallbackModel;
+  }
+
+  private async selectModel(modelId: string): Promise<void> {
+    const config = await loadFreeCopilotConfig();
+
+    const model = config.models.find(
+      (item) => getFreeCopilotModelId(item) === modelId,
+    );
+
+    if (!model) {
+      throw new Error(`Configured model "${modelId}" was not found.`);
+    }
+
+    await this._extensionContext.globalState.update(
+      FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+      modelId,
+    );
+
+    this._webviewView?.webview.postMessage({
+      command: "modelSelected",
+      model: {
+        id: getFreeCopilotModelId(model),
+        name: model.name,
+        provider: model.provider,
+        model: model.model,
+        roles: model.roles ?? [],
+      },
+    });
+  }
+
+  private async sendConfiguredModels(): Promise<void> {
+    const activeConfigPath = this.getActiveConfigPath();
+
+    const config = await loadFreeCopilotConfig();
+
+    const selectedModelId = this._extensionContext.globalState.get<string>(
+      FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+    );
+
+    this._webviewView?.webview.postMessage({
+      command: "configuredModels",
+
+      selectedModelId:
+        selectedModelId ?? getFreeCopilotModelId(config.models[0]),
+
+      activeConfig: {
+        name: config.name,
+        fileName: path.basename(activeConfigPath),
+        filePath: activeConfigPath,
+      },
+
+      models: config.models.map((model) => ({
+        id: getFreeCopilotModelId(model),
+        name: model.name,
+        provider: model.provider,
+        model: model.model,
+        roles: model.roles ?? [],
+      })),
+    });
+  }
+
+  public async refreshConfiguredModels(): Promise<void> {
+    try {
+      await this.sendConfiguredModels();
+    } catch (error: any) {
+      this._webviewView?.webview.postMessage({
+        command: "showError",
+        text: error?.message ?? "Failed to reload Main Config.",
+      });
+    }
+  }
+
+  private async getConfiguredModel(
+    role:
+      | "chat"
+      | "edit"
+      | "apply"
+      | "resolver"
+      | "planner"
+      | "changeGenerator"
+      | "embed",
+  ): Promise<FreeCopilotModel> {
+    const config = await loadFreeCopilotConfig();
+
+    const model = config.models.find((item) => item.roles?.includes(role));
+
+    if (!model) {
+      throw new Error(
+        `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
+      );
+    }
+
+    return model;
+  }
+
   // Fully converted to real-time NDJSON chunk stream handling with Abort Signal integration
   private async handleChatMessage(data: any, webviewView: vscode.WebviewView) {
-    const { text, provider, attachment, attachmentType } = data;
+    const { text, attachment, attachmentType } = data;
+    let chatModel: FreeCopilotModel;
+
+    try {
+      chatModel = await this.getSelectedModel("chat");
+    } catch (error: any) {
+      webviewView.webview.postMessage({
+        command: "showError",
+        text: error?.message ?? "No Chat model is configured.",
+      });
+      return;
+    }
+
+    const provider = chatModel.provider;
     // BLOCK UNSUPPORTED LOCAL IMAGE INPUT
     if (attachment && attachmentType?.startsWith("image/")) {
-      if (provider === "ollama-qwen3-local") {
+      if (provider === "ollama") {
         webviewView.webview.postMessage({
           command: "showError",
-          text: "Local Ollama Error: qwen3-coder:30b is a text model and does not support image uploads.",
+          text: `Local Ollama Error: ${chatModel.model} is a text model and does not support image uploads.`,
         });
         return;
       }
@@ -786,8 +1044,8 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     this._activeAbortController = new AbortController();
 
     try {
-      if (provider === "ollama-qwen3-local") {
-        const OLLAMA_URL = "http://localhost:11434/api/chat";
+      if (provider === "ollama") {
+        const OLLAMA_URL = `${chatModel.apiBase ?? "http://localhost:11434"}/api/chat`;
 
         // NORMAL CHAT SYSTEM PROMPT
         const systemMessage = [
@@ -819,7 +1077,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         ].join("\n");
 
         const payload = {
-          model: "qwen3-coder:30b",
+          model: chatModel.model,
           messages: [
             {
               role: "system",
@@ -906,7 +1164,10 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async handleAgentRequest(instruction: string): Promise<void> {
+  private async handleAgentRequest(
+    instruction: string,
+    requestedModelId?: string,
+  ): Promise<void> {
     /*
      * ---------------------------------------------------------
      * 1. Prevent concurrent Agent tasks.
@@ -965,6 +1226,75 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       this._agentAbortController = new AbortController();
 
       const signal = this._agentAbortController.signal;
+
+      /*
+       * -------------------------------------------------------
+       * 3A. Snapshot the selected Agent model.
+       *
+       * The selected model is captured once when the Agent
+       * starts. Later stages must use this same model even
+       * if the user changes the model selector while the
+       * task is running.
+       * -------------------------------------------------------
+       */
+      const config = await loadFreeCopilotConfig();
+
+      const selectedResolverModelId =
+        requestedModelId ??
+        this._extensionContext.globalState.get<string>(
+          FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+        );
+
+      const getRoleModel = (
+        role: "resolver" | "planner" | "changeGenerator",
+        preferredModelId?: string,
+      ): FreeCopilotModel => {
+        const model = preferredModelId
+          ? config.models.find(
+              (item) =>
+                getFreeCopilotModelId(item) === preferredModelId &&
+                item.roles?.includes(role),
+            )
+          : config.models.find((item) => item.roles?.includes(role));
+
+        if (!model) {
+          if (preferredModelId) {
+            const preferredModel = config.models.find(
+              (item) => getFreeCopilotModelId(item) === preferredModelId,
+            );
+
+            throw new Error(
+              `The selected model "${preferredModel?.name ?? preferredModelId}" does not support the "${role}" role.`,
+            );
+          }
+
+          throw new Error(
+            `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
+          );
+        }
+
+        if (model.provider !== "ollama") {
+          throw new Error(
+            `The "${role}" role currently supports only Ollama. Configured provider: ${model.provider}`,
+          );
+        }
+
+        return model;
+      };
+
+      const resolverModel = getRoleModel("resolver", selectedResolverModelId);
+
+      const plannerModel = getRoleModel("planner");
+
+      const changeGeneratorModel = getRoleModel("changeGenerator");
+
+      const modelSnapshot: AgentModelSnapshot = {
+        resolver: getFreeCopilotModelId(resolverModel),
+        planner: getFreeCopilotModelId(plannerModel),
+        changeGenerator: getFreeCopilotModelId(changeGeneratorModel),
+      };
+
+      const agentModelId = modelSnapshot.resolver;
 
       /*
        * -------------------------------------------------------
@@ -1031,6 +1361,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       const resolution = await resolveAgentRequest(
         agentInstruction,
         resolutionContext,
+        modelSnapshot.resolver,
         signal,
       );
 
@@ -1134,6 +1465,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       const plan = await generateAgentPlan(
         resolution.instruction,
         context,
+        modelSnapshot.planner,
         signal,
       );
 
@@ -1175,6 +1507,9 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        */
       const task: AgentTask = {
         id: createTaskId(),
+
+        modelId: agentModelId,
+        modelSnapshot,
 
         instruction: resolution.instruction,
 

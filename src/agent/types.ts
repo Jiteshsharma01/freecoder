@@ -12,6 +12,7 @@ export type AgentTaskStatus =
 
 export interface AgentTask {
   id: string;
+  modelId: string;
   instruction: string;
   scope: AgentScope;
   currentFile?: string;
@@ -19,6 +20,7 @@ export interface AgentTask {
   context: AgentContext;
   changes: FileChange[];
   status: AgentTaskStatus;
+  modelSnapshot?: AgentModelSnapshot;
   undone?: boolean;
 }
 
@@ -47,6 +49,12 @@ export interface FileContext {
 export interface GraphContext {
   dependencies: string[];
   dependents: string[];
+}
+
+export interface AgentModelSnapshot {
+  resolver: string;
+  planner: string;
+  changeGenerator: string;
 }
 
 export interface FileChange {

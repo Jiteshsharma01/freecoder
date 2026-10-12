@@ -1,7 +1,10 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-
 import { AgentTask, FileChange } from "./types";
+import {
+  getFreeCopilotModelId,
+  loadFreeCopilotConfig,
+} from "../config/modelConfig";
 
 interface AIFileChange {
   path: string;
@@ -16,37 +19,56 @@ interface AIChangeResponse {
   changes: AIFileChange[];
 }
 
-const OLLAMA_URL = "http://localhost:11434/api/chat";
-
-const OLLAMA_MODEL = "qwen3-coder:30b";
-
 export async function generateFileChanges(
   task: AgentTask,
   rootPath: string,
   signal?: AbortSignal,
 ): Promise<FileChange[]> {
-  if (signal?.aborted) {
-    throw new DOMException(
-      "Agent change generation was cancelled before it started.",
-      "AbortError",
-    );
-  }
   if (task.targetFiles.length === 0) {
     throw new Error("The agent plan does not contain any target files.");
   }
 
-  const currentFiles = await readTargetFiles(task, rootPath);
+  const selectedModelId = task.modelSnapshot?.changeGenerator ?? task.modelId;
 
+  if (!selectedModelId) {
+    throw new Error("No model is assigned to the change generator.");
+  }
+
+  const config = await loadFreeCopilotConfig();
+
+  const model = config.models.find(
+    (item) =>
+      getFreeCopilotModelId(item) === selectedModelId &&
+      item.roles?.includes("changeGenerator"),
+  );
+
+  if (!model) {
+    throw new Error(
+      `No configured change generator model found for "${selectedModelId}".`,
+    );
+  }
+
+  if (model.provider !== "ollama") {
+    throw new Error(
+      `The change generator currently supports only Ollama. Configured provider: ${model.provider}`,
+    );
+  }
+
+  const apiBase = model.apiBase ?? "http://localhost:11434";
+
+  const ollamaUrl = `${apiBase.replace(/\/$/, "")}/api/chat`;
+
+  const currentFiles = await readTargetFiles(task, rootPath);
   const prompt = buildChangeGenerationPrompt(task, currentFiles);
 
   try {
-    const response = await fetch(OLLAMA_URL, {
+    const response = await fetch(ollamaUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
+        model: model.model,
         messages: [
           {
             role: "system",
@@ -63,7 +85,9 @@ export async function generateFileChanges(
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama change generator returned HTTP ${response.status}`);
+      throw new Error(
+        `Ollama change generator returned HTTP ${response.status}`,
+      );
     }
 
     const data = (await response.json()) as {
@@ -86,8 +110,10 @@ export async function generateFileChanges(
       name: error?.name,
       message: error?.message,
       signalAborted: signal?.aborted,
-      url: OLLAMA_URL,
+      url: ollamaUrl,
+      model: model.model,
     });
+
     throw error;
   }
 }

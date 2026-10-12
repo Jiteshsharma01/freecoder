@@ -456,7 +456,7 @@ Broad standalone terms such as `structure` or `repository` are not by themselves
 
 The current Agent planning and file-change generation pipeline uses the local Ollama model.
 
-## 2. Multi-Modal Assets (Gemini / Free API)
+## Multi-Modal Assets (Gemini / Free API)(Optional)
 
 The provider selector includes:
 
@@ -464,6 +464,13 @@ The provider selector includes:
 * Hugging Face API
 
 Image/file upload support is present in the UI. Multi-modal online-provider functionality is still under development.
+
+## 2. NPM Build
+Compiles source files (like TypeScript into JavaScript)
+
+```bash
+npm run compile
+```
 
 ## 3. Package the Extension
 
@@ -833,6 +840,7 @@ vsce package --allow-missing-repository
 ✅ Stop Agent
 ✅ Ambiguous delete target resolution
 ✅ Explicit-path delete handling
+✅ Config based mode & model selection
 
 ⏸️ Advanced rename/refactor behavior
 ⏸️ Richer symbol-level graph intelligence

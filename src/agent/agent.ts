@@ -12,6 +12,7 @@ export async function runAgentTask(
   graph: KnowledgeGraph | null,
   analysis: ProjectAnalysis,
   targetFiles: string[],
+  modelId: string,
   signal?: AbortSignal,
 ): Promise<AgentTask | AgentPlan> {
   /*
@@ -42,7 +43,7 @@ export async function runAgentTask(
    * 2. Generate the actual Agent plan.
    * ---------------------------------------------------------
    */
-  const plan = await generateAgentPlan(instruction, context, signal);
+  const plan = await generateAgentPlan(instruction, context, modelId, signal);
 
   /*
    * ---------------------------------------------------------
@@ -63,6 +64,8 @@ export async function runAgentTask(
    */
   return {
     id: createTaskId(),
+
+    modelId,
 
     instruction,
 

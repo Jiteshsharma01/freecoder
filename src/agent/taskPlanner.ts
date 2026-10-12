@@ -3,6 +3,11 @@ import { extractJsonObject } from "./changeGenerator";
 import { AgentContext, FileChange } from "./types";
 import { ProjectAnalysis } from "../projectAnalysis/types";
 import { findCandidateFilePaths } from "./contextBuilder";
+import {
+  getFreeCopilotModelId,
+  loadFreeCopilotConfig,
+  FreeCopilotModel,
+} from "../config/modelConfig";
 
 export type AgentPlanStatus = "ready" | "clarification";
 export type AgentResolutionStatus = "ready" | "clarification";
@@ -47,14 +52,59 @@ export interface PlannedChange {
   reason: string;
 }
 
-const OLLAMA_URL = "http://localhost:11434/api/chat";
-const OLLAMA_MODEL = "qwen3-coder:30b";
+async function getConfiguredAgentModel(
+  role:
+    | "chat"
+    | "edit"
+    | "apply"
+    | "resolver"
+    | "planner"
+    | "changeGenerator"
+    | "embed",
+  modelId?: string,
+): Promise<FreeCopilotModel> {
+  const config = await loadFreeCopilotConfig();
+
+  const model = modelId
+    ? config.models.find(
+        (item) =>
+          getFreeCopilotModelId(item) === modelId && item.roles?.includes(role),
+      )
+    : config.models.find((item) => item.roles?.includes(role));
+
+  if (!model) {
+    if (modelId) {
+      throw new Error(
+        `The selected Agent model "${modelId}" is not configured or does not support the "${role}" role.`,
+      );
+    }
+
+    throw new Error(
+      `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
+    );
+  }
+
+  if (model.provider !== "ollama") {
+    throw new Error(
+      `The "${role}" role currently supports only the "ollama" provider. Configured provider: ${model.provider}`,
+    );
+  }
+
+  return model;
+}
 
 export async function generateAgentPlan(
   instruction: string,
   context: AgentContext,
+  modelId: string,
   signal?: AbortSignal,
 ): Promise<AgentPlan> {
+  const plannerModel = await getConfiguredAgentModel("planner", modelId);
+
+  const apiBase = plannerModel.apiBase ?? "http://localhost:11434";
+
+  const ollamaUrl = `${apiBase.replace(/\/$/, "")}/api/chat`;
+
   const prompt = buildPlannerPrompt(instruction, context);
 
   if (signal?.aborted) {
@@ -64,13 +114,16 @@ export async function generateAgentPlan(
     );
   }
 
-  const response = await fetch(OLLAMA_URL, {
+  const response = await fetch(ollamaUrl, {
     method: "POST",
+
     headers: {
       "Content-Type": "application/json",
     },
+
     body: JSON.stringify({
-      model: OLLAMA_MODEL,
+      model: plannerModel.model,
+
       messages: [
         {
           role: "system",
@@ -81,9 +134,11 @@ export async function generateAgentPlan(
           content: prompt,
         },
       ],
+
       format: "json",
       stream: false,
     }),
+
     signal,
   });
 
@@ -900,23 +955,6 @@ function isPlannedChange(value: unknown): value is PlannedChange {
   return true;
 }
 
-// function buildResolutionContext(
-//   instruction: string,
-//   analysis: ProjectAnalysis,
-// ): AgentResolutionContext {
-//   const explicitFile = extractExplicitTargetFile(instruction);
-
-//   const candidateFiles = findCandidateFilePaths(instruction, analysis);
-
-//   return {
-//     activeFile: getActiveFilePath(),
-
-//     candidateFiles,
-
-//     explicitFile: explicitFile ?? undefined,
-//   };
-// }
-
 function buildResolutionSystemPrompt(): string {
   return [
     "You are the request-resolution engine for FreeCopilot.",
@@ -1115,8 +1153,15 @@ function validateAgentResolution(
 export async function resolveAgentRequest(
   instruction: string,
   context: AgentResolutionContext,
+  modelId: string,
   signal?: AbortSignal,
 ): Promise<AgentResolution> {
+  const resolverModel = await getConfiguredAgentModel("resolver", modelId);
+
+  const apiBase = resolverModel.apiBase ?? "http://localhost:11434";
+
+  const ollamaUrl = `${apiBase.replace(/\/$/, "")}/api/chat`;
+
   const prompt = buildResolutionPrompt(instruction, context);
 
   if (signal?.aborted) {
@@ -1126,7 +1171,7 @@ export async function resolveAgentRequest(
     );
   }
 
-  const response = await fetch(OLLAMA_URL, {
+  const response = await fetch(ollamaUrl, {
     method: "POST",
 
     headers: {
@@ -1134,23 +1179,20 @@ export async function resolveAgentRequest(
     },
 
     body: JSON.stringify({
-      model: OLLAMA_MODEL,
+      model: resolverModel.model,
 
       messages: [
         {
           role: "system",
-
           content: buildResolutionSystemPrompt(),
         },
         {
           role: "user",
-
           content: prompt,
         },
       ],
 
       format: "json",
-
       stream: false,
     }),
 

@@ -2,8 +2,8 @@
   "name": "freecopilot",
   "displayName": "FreeCopilot",
   "description": "A free AI assistant with project mapping and asset uploading.",
-  "version": "0.0.3",
-  "publisher": "local-itui", 
+  "version": "0.0.4",
+  "publisher": "local-itui",
   "engines": {
     "vscode": "^1.125.0"
   },
@@ -54,16 +54,17 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@types/vscode": "^1.125.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
-    "typescript-eslint": "^8.61.1",
-    "eslint": "^10.5.0",
+    "@types/vscode": "^1.125.0",
     "@vscode/test-cli": "^0.0.15",
-    "@vscode/test-electron": "^3.0.0"
+    "@vscode/test-electron": "^3.0.0",
+    "eslint": "^10.5.0",
+    "typescript-eslint": "^8.61.1"
   },
   "overrides": {
     "diff": "^8.0.4",
