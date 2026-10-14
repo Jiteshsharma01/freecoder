@@ -19,6 +19,10 @@ export function getChatHtml(webviewUri: string): string {
             .msg { margin-bottom: 10px; padding: 6px; border-radius: 4px; }
             .user-msg { background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-textBlockQuote-border); max-height: 200px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 12px; }
             .ai-msg { padding: 8px 0; }
+            .ollama-model-add-btn { background: transparent; border: 1px solid; border-radius: 20px; color: var(--vscode-descriptionForeground); cursor: pointer; padding: 4px 8px; font-size: 11px; width: auto; }
+            .ollama-model-add-btn:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+            .ollama-model-add-btn:disabled { cursor: not-allowed; border-style: dashed; background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-disabledForeground); }
+
             #input-box { border: 1px solid #3b3a3a; border-radius: 8px; overflow: visible; position: relative; flex-shrink: 0; }
             textarea { resize: none; min-height: 70px; max-height: 400px; overflow-y: auto; box-sizing: border-box; display: block; border: none; padding: 8px; background: transparent; }
             #input-box:focus-within { border: 1px solid #565656; }
@@ -128,7 +132,7 @@ export function getChatHtml(webviewUri: string): string {
                         class="config-menu-item active"
                         type="button"
                     >
-                        🖥️&nbsp;&nbsp;Main Config
+                        🖳&nbsp;&nbsp;Main Config
                     </button>
                     <button
                         id="main-config-reload"
@@ -136,6 +140,14 @@ export function getChatHtml(webviewUri: string): string {
                         type="button"
                     >
                         ⟳&nbsp;&nbsp;Reload
+                    </button>
+                    <button
+                        id="discover-ollama-models"
+                        class="config-menu-item"
+                        type="button"
+                    >
+                        🔍︎
+                        Discover Ollama Models
                     </button>
                 </div>
             </div>
@@ -1309,6 +1321,7 @@ export function getChatHtml(webviewUri: string): string {
             var mainConfigMenu = document.getElementById('main-config-menu');
             var mainConfigReload = document.getElementById('main-config-reload');
             var mainConfigItem = document.querySelector('#main-config-menu .config-menu-item.active');
+            var discoverOllamaModels = document.getElementById('discover-ollama-models');
 
             if (mainConfigBtn && mainConfigMenu) {
                 mainConfigBtn.addEventListener('click', function(event) {
@@ -1343,6 +1356,16 @@ export function getChatHtml(webviewUri: string): string {
                 mainConfigReload.addEventListener('click', function() {
                     vscode.postMessage({
                         command: 'reloadConfig'
+                    });
+                    if (mainConfigMenu) {
+                        mainConfigMenu.classList.remove('visible');
+                    }
+                });
+            }
+            if (discoverOllamaModels) {
+                discoverOllamaModels.addEventListener('click', function() {
+                    vscode.postMessage({
+                        command: 'discoverOllamaModels'
                     });
                     if (mainConfigMenu) {
                         mainConfigMenu.classList.remove('visible');
@@ -1947,6 +1970,77 @@ export function getChatHtml(webviewUri: string): string {
                 scrollToBottom();
             }
 
+            function renderOllamaDiscoveredModels(models) {
+                if (!chatLog) { return; }
+
+                var resultDiv = document.createElement('div');
+                resultDiv.className = 'msg ai-msg';
+
+                var title = document.createElement('div');
+                title.style.fontWeight = '600';
+                title.textContent = 'Installed Ollama Models';
+                resultDiv.appendChild(title);
+
+                var discoveredModels = Array.isArray(models) ? models : [];
+
+                if (discoveredModels.length === 0) {
+                    var emptyMessage = document.createElement('div');
+                    emptyMessage.style.marginTop = '8px';
+                    emptyMessage.textContent = 'No Ollama models found.';
+                    resultDiv.appendChild(emptyMessage);
+                }
+
+                discoveredModels.forEach(function(model) {
+                    var row = document.createElement('div');
+                    row.style.display = 'flex';
+                    row.style.alignItems = 'center';
+                    row.style.justifyContent = 'space-between';
+                    row.style.gap = '8px';
+                    row.style.marginTop = '8px';
+
+                    var label = document.createElement('span');
+                    label.textContent = model.name;
+                    label.style.wordBreak = 'break-word';
+
+                    var alreadyConfigured = model.alreadyConfigured === true;
+                    var addButton = document.createElement('button');
+                    addButton.type = 'button';
+                    addButton.className = 'ollama-model-add-btn';
+                    addButton.dataset.modelName = model.name;
+                    addButton.textContent = alreadyConfigured
+                        ? 'Added'
+                        : 'Add';
+                    addButton.disabled = alreadyConfigured;
+                    addButton.style.width = 'auto';
+
+                    addButton.addEventListener('click', function() {
+                        addButton.disabled = true;
+                        addButton.textContent = 'Adding...';
+
+                        vscode.postMessage({
+                            command: 'addOllamaModel',
+                            modelName: model.name
+                        });
+                    });
+
+                    row.appendChild(label);
+                    row.appendChild(addButton);
+                    resultDiv.appendChild(row);
+                });
+
+                var note = document.createElement('div');
+                note.style.marginTop = '10px';
+                note.style.fontSize = '11px';
+                note.style.opacity = '0.8';
+                note.textContent =
+                    'Models are added without roles. Assign roles in config.yaml before using them.';
+
+                resultDiv.appendChild(note);
+                chatLog.appendChild(resultDiv);
+
+                scrollToBottom();
+            }
+
             var AGENT_STAGES = [
                 {
                     id: 'planning',
@@ -2342,6 +2436,30 @@ export function getChatHtml(webviewUri: string): string {
                             message.selectedModelId
                         );
                         break;
+                    case 'ollamaModelsDiscovered':
+                        renderOllamaDiscoveredModels(message.models);
+                        break;
+                    case 'ollamaModelAdded': {
+                        document.querySelectorAll('.ollama-model-add-btn').forEach(
+                            function(button) {
+                                if (button.dataset.modelName === message.modelName) {
+                                    button.disabled = true;
+                                    
+                                    button.textContent = message.added
+                                        ? 'Added'
+                                        : 'Already added';
+                                }
+                            }
+                        );
+
+                        var notice = document.createElement('div');
+                        notice.className = 'msg ai-msg';
+                        notice.textContent = message.message;
+
+                        chatLog.appendChild(notice);
+                        scrollToBottom();
+                        break;
+                    }
                     case 'modelSelected':
                         if (message.model && message.model.id) {
                             selectedModelId = message.model.id;

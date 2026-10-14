@@ -1,7 +1,12 @@
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import {
+  isSeq,
+  parse as parseYaml,
+  parseDocument,
+  stringify as stringifyYaml,
+} from "yaml";
 
 export type FreeCopilotModelRole =
   | "chat"
@@ -23,6 +28,13 @@ export interface FreeCopilotModel {
   apiBase?: string;
   roles?: FreeCopilotModelRole[];
   options?: FreeCopilotModelOptions;
+}
+
+export interface InstalledOllamaModel {
+  name: string;
+  size?: number;
+  digest?: string;
+  modifiedAt?: string;
 }
 
 export interface FreeCopilotConfig {
@@ -108,6 +120,198 @@ export async function loadFreeCopilotConfig(): Promise<FreeCopilotConfig> {
   }
 
   return validateFreeCopilotConfig(parsed);
+}
+
+export async function validateOllamaModelAvailable(
+  model: FreeCopilotModel,
+): Promise<void> {
+  if (model.provider.toLowerCase() !== "ollama") {
+    throw new Error(
+      `Model "${model.name}" uses unsupported provider "${model.provider}" for Ollama validation.`,
+    );
+  }
+
+  const apiBase = (model.apiBase ?? "http://localhost:11434").replace(
+    /\/+$/,
+    "",
+  );
+
+  const tagsUrl = `${apiBase}/api/tags`;
+
+  let response: Response;
+
+  try {
+    response = await fetch(tagsUrl);
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? ` ${error.message}` : "";
+
+    throw new Error(
+      `Cannot connect to Ollama at "${apiBase}" while checking model "${model.name}". Ensure Ollama is running.${reason}`,
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to check installed Ollama models at "${apiBase}". HTTP ${response.status}.`,
+    );
+  }
+
+  const data = (await response.json()) as {
+    models?: Array<{
+      name?: string;
+      model?: string;
+    }>;
+  };
+
+  const installed = (data.models ?? []).some(
+    (item) => item.name === model.model || item.model === model.model,
+  );
+
+  if (!installed) {
+    throw new Error(
+      [
+        `Configured model "${model.model}" (${model.name}) is not installed in Ollama at "${apiBase}".`,
+        `Run "ollama pull ${model.model}" to install it.`,
+      ].join(" "),
+    );
+  }
+}
+
+export async function listInstalledOllamaModels(
+  apiBase = "http://localhost:11434",
+): Promise<InstalledOllamaModel[]> {
+  const baseUrl = apiBase.trim().replace(/\/+$/, "");
+
+  if (!baseUrl) {
+    throw new Error("Ollama API URL cannot be empty.");
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${baseUrl}/api/tags`);
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? ` ${error.message}` : "";
+
+    throw new Error(
+      `Cannot connect to Ollama at "${baseUrl}". Ensure Ollama is running.${reason}`,
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to discover Ollama models. HTTP ${response.status}.`,
+    );
+  }
+
+  const data = (await response.json()) as {
+    models?: unknown;
+  };
+
+  if (!Array.isArray(data.models)) {
+    throw new Error("Ollama returned an invalid model list.");
+  }
+
+  const models: InstalledOllamaModel[] = [];
+
+  for (const entry of data.models) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const item = entry as Record<string, unknown>;
+
+    const name =
+      typeof item.name === "string"
+        ? item.name.trim()
+        : typeof item.model === "string"
+          ? item.model.trim()
+          : "";
+
+    if (!name) {
+      continue;
+    }
+
+    models.push({
+      name,
+      size: typeof item.size === "number" ? item.size : undefined,
+      digest: typeof item.digest === "string" ? item.digest : undefined,
+      modifiedAt:
+        typeof item.modified_at === "string" ? item.modified_at : undefined,
+    });
+  }
+
+  return models.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function addOllamaModelToConfig(
+  modelName: string,
+  apiBase = "http://localhost:11434",
+): Promise<{
+  added: boolean;
+  model: FreeCopilotModel;
+}> {
+  const name = modelName.trim();
+  const normalizedApiBase = apiBase.trim().replace(/\/+$/, "");
+
+  if (!name) {
+    throw new Error("Ollama model name cannot be empty.");
+  }
+
+  if (!normalizedApiBase) {
+    throw new Error("Ollama API URL cannot be empty.");
+  }
+
+  await ensureFreeCopilotConfig();
+
+  const raw = await fs.readFile(FREECOPILOT_CONFIG_FILE, "utf8");
+
+  const document = parseDocument(raw);
+
+  if (document.errors.length > 0) {
+    throw new Error(
+      `Failed to parse FreeCopilot config.yaml: ${document.errors
+        .map((error) => error.message)
+        .join("; ")}`,
+    );
+  }
+
+  const config = validateFreeCopilotConfig(document.toJSON());
+
+  // Avoid adding the same Ollama model twice.
+  const existingModel = config.models.find(
+    (item) => item.provider.toLowerCase() === "ollama" && item.model === name,
+  );
+
+  if (existingModel) {
+    return {
+      added: false,
+      model: existingModel,
+    };
+  }
+
+  const modelsNode = document.get("models", true);
+
+  if (!isSeq(modelsNode)) {
+    throw new Error("FreeCopilot config.yaml must contain a models sequence.");
+  }
+
+  const newModel: FreeCopilotModel = {
+    name,
+    provider: "ollama",
+    model: name,
+    apiBase: normalizedApiBase,
+    roles: [],
+  };
+
+  modelsNode.add(newModel);
+
+  await fs.writeFile(FREECOPILOT_CONFIG_FILE, document.toString(), "utf8");
+
+  return {
+    added: true,
+    model: newModel,
+  };
 }
 
 export function validateFreeCopilotConfig(value: unknown): FreeCopilotConfig {

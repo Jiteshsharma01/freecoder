@@ -38,9 +38,12 @@ import {
   buildAgentResolutionContext,
 } from "./agent/contextBuilder";
 import {
+  addOllamaModelToConfig,
   ensureFreeCopilotConfig,
   getFreeCopilotModelId,
   loadFreeCopilotConfig,
+  listInstalledOllamaModels,
+  validateOllamaModelAvailable,
   FREECOPILOT_CONFIG_FILE,
   FreeCopilotModel,
 } from "./config/modelConfig";
@@ -456,6 +459,88 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           }
           break;
         }
+        case "discoverOllamaModels": {
+          try {
+            const installedModels = await listInstalledOllamaModels();
+            const config = await loadFreeCopilotConfig();
+            const defaultApiBase = "http://localhost:11434";
+            const models = installedModels.map((installedModel) => {
+              const alreadyConfigured = config.models.some(
+                (configuredModel) =>
+                  configuredModel.provider.toLowerCase() === "ollama" &&
+                  configuredModel.model === installedModel.name &&
+                  (configuredModel.apiBase ?? defaultApiBase).replace(
+                    /\/+$/,
+                    "",
+                  ) === defaultApiBase,
+              );
+
+              return {
+                ...installedModel,
+                alreadyConfigured,
+              };
+            });
+
+            webviewView.webview.postMessage({
+              command: "ollamaModelsDiscovered",
+              models,
+            });
+          } catch (error: any) {
+            webviewView.webview.postMessage({
+              command: "showError",
+              text: error?.message ?? "Failed to discover Ollama models.",
+            });
+          }
+
+          break;
+        }
+
+        case "addOllamaModel": {
+          const modelName =
+            typeof data.modelName === "string" ? data.modelName.trim() : "";
+
+          if (!modelName) {
+            break;
+          }
+
+          try {
+            const result = await addOllamaModelToConfig(modelName);
+
+            webviewView.webview.postMessage({
+              command: "ollamaModelAdded",
+              modelName,
+              added: result.added,
+              message: result.added
+                ? `Added "${modelName}" to Main Config. No roles were assigned.`
+                : `"${modelName}" is already in Main Config.`,
+            });
+
+            if (result.added) {
+              try {
+                await this.sendConfiguredModels();
+              } catch (refreshError: any) {
+                webviewView.webview.postMessage({
+                  command: "showError",
+                  text:
+                    `Model "${modelName}" was added, but the model list ` +
+                    `could not be refreshed: ${
+                      refreshError?.message ?? "Unknown error."
+                    }`,
+                });
+              }
+            }
+          } catch (error: any) {
+            webviewView.webview.postMessage({
+              command: "showError",
+              text:
+                error?.message ??
+                "Failed to add the Ollama model to Main Config.",
+            });
+          }
+
+          break;
+        }
+
         case "selectModel": {
           try {
             const modelId =
@@ -524,13 +609,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       this._extensionContext.globalState.get<string>(
         FreeCopilotViewProvider.ACTIVE_CONFIG_STATE_KEY,
       ) ?? FREECOPILOT_CONFIG_FILE
-    );
-  }
-
-  private async setActiveConfig(configPath: string): Promise<void> {
-    await this._extensionContext.globalState.update(
-      FreeCopilotViewProvider.ACTIVE_CONFIG_STATE_KEY,
-      configPath,
     );
   }
 
@@ -877,7 +955,10 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     );
 
     if (!model) {
-      throw new Error(`Configured model "${modelId}" was not found.`);
+      // The requested model may have been removed during a reload.
+      // Refresh the list and recover the saved Chat selection.
+      await this.sendConfiguredModels();
+      return;
     }
 
     await this._extensionContext.globalState.update(
@@ -899,18 +980,42 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
   private async sendConfiguredModels(): Promise<void> {
     const activeConfigPath = this.getActiveConfigPath();
-
     const config = await loadFreeCopilotConfig();
 
-    const selectedModelId = this._extensionContext.globalState.get<string>(
-      FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+    const storedSelectedModelId =
+      this._extensionContext.globalState.get<string>(
+        FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+      );
+
+    const storedModel = config.models.find(
+      (model) => getFreeCopilotModelId(model) === storedSelectedModelId,
     );
+
+    // The persisted selection is used by normal Chat,
+    // so it must still support the "chat" role.
+    const selectedModel = storedModel?.roles?.includes("chat")
+      ? storedModel
+      : config.models.find((model) => model.roles?.includes("chat"));
+
+    if (!selectedModel) {
+      throw new Error(
+        'No model is configured for the "chat" role in ~/.freecopilot/config.yaml.',
+      );
+    }
+
+    const selectedModelId = getFreeCopilotModelId(selectedModel);
+
+    // Repair stale or role-incompatible saved selections.
+    if (selectedModelId !== storedSelectedModelId) {
+      await this._extensionContext.globalState.update(
+        FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+        selectedModelId,
+      );
+    }
 
     this._webviewView?.webview.postMessage({
       command: "configuredModels",
-
-      selectedModelId:
-        selectedModelId ?? getFreeCopilotModelId(config.models[0]),
+      selectedModelId,
 
       activeConfig: {
         name: config.name,
@@ -1295,6 +1400,33 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       };
 
       const agentModelId = modelSnapshot.resolver;
+
+      const modelsToValidate = new Map<string, FreeCopilotModel>();
+
+      for (const model of [resolverModel, plannerModel, changeGeneratorModel]) {
+        const apiBase = (model.apiBase ?? "http://localhost:11434").replace(
+          /\/+$/,
+          "",
+        );
+
+        const key = [model.provider.toLowerCase(), apiBase, model.model].join(
+          "|",
+        );
+
+        modelsToValidate.set(key, model);
+      }
+
+      this._webviewView?.webview.postMessage({
+        command: "agentProgress",
+        stage: "planning",
+        text: "Checking configured Agent models...",
+      });
+
+      await Promise.all(
+        Array.from(modelsToValidate.values()).map((model) =>
+          validateOllamaModelAvailable(model),
+        ),
+      );
 
       /*
        * -------------------------------------------------------
