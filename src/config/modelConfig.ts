@@ -432,3 +432,39 @@ function validateFreeCopilotModel(
 export function getFreeCopilotModelId(model: FreeCopilotModel): string {
   return [model.provider, model.model].join(":").toLowerCase();
 }
+
+export function getFreeCopilotModelForRole(
+  models: FreeCopilotModel[],
+  role: FreeCopilotModelRole,
+  preferredModelId?: string,
+): FreeCopilotModel {
+  if (preferredModelId) {
+    const normalizedId = preferredModelId.trim().toLowerCase();
+
+    const preferredModel = models.find(
+      (model) => getFreeCopilotModelId(model) === normalizedId,
+    );
+
+    if (!preferredModel) {
+      throw new Error(`Configured model "${preferredModelId}" was not found.`);
+    }
+
+    if (!preferredModel.roles?.includes(role)) {
+      throw new Error(
+        `The selected model "${preferredModel.name}" does not support the "${role}" role.`,
+      );
+    }
+
+    return preferredModel;
+  }
+
+  const model = models.find((item) => item.roles?.includes(role));
+
+  if (!model) {
+    throw new Error(
+      `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
+    );
+  }
+
+  return model;
+}

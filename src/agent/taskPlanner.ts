@@ -911,6 +911,23 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\.\/+/, "");
 }
 
+function extractExplicitCreateTargetFile(instruction: string): string | null {
+  if (!/\b(?:create|add|make|write|generate)\b/i.test(instruction)) {
+    return null;
+  }
+
+  const matches = [
+    ...instruction.matchAll(
+      /(?:^|[\s"'`])((?:[\w.-]+[\\/])*[\w.-]+\.[A-Za-z0-9_-]+)(?=$|[\s"'`,;])/g,
+    ),
+  ];
+
+  const paths = [...new Set(matches.map((match) => normalizePath(match[1])))];
+
+  // Do not guess if the request mentions multiple file paths.
+  return paths.length === 1 ? paths[0] : null;
+}
+
 function extractExplicitTargetFile(instruction: string): string | null {
   const match = instruction.match(
     /\bin\s+(?:this\s+)?file\s*:\s*["']?([^"'\\\r\n]+(?:\\[^"'\\\r\n]+)*)["']?/i,
@@ -984,8 +1001,10 @@ function buildResolutionSystemPrompt(): string {
     "- Set allowRewrite to true.",
     "",
     "For ready:",
-    "- targetFiles must contain the files the Agent should inspect.",
-    "- Do not add unrelated project files.",
+    "- For create/add/write/generate requests, an explicitly named new file is a valid target even if it does not exist yet.",
+    "- If the user specifies a filename and asks for the root directory, use that filename as a workspace-relative root path.",
+    "- Always include an explicitly requested new file in targetFiles.",
+    "- If a file creation request does not specify a filename, request clarification.",
     "",
     "Return ONLY valid JSON.",
     "Do not use markdown.",
@@ -1064,11 +1083,12 @@ function validateAgentResolution(
   }
 
   const data = value as Record<string, unknown>;
-
   const rawStatus = data.status;
 
   if (rawStatus !== "ready" && rawStatus !== "clarification") {
-    throw new Error("The AI returned an invalid Agent resolution status.");
+    throw new Error(
+      `The AI returned an invalid Agent resolution status. Response: ${JSON.stringify(data)}`,
+    );
   }
 
   const status = rawStatus as AgentResolutionStatus;
@@ -1078,7 +1098,7 @@ function validateAgentResolution(
       ? data.instruction.trim()
       : instruction;
 
-  const targetFiles = Array.isArray(data.targetFiles)
+  const targetFiles: string[] = Array.isArray(data.targetFiles)
     ? data.targetFiles
         .filter(
           (item): item is string =>
@@ -1087,61 +1107,80 @@ function validateAgentResolution(
         .map((item) => normalizePath(item))
     : [];
 
-  if (status === "ready") {
-    if (targetFiles.length === 0) {
-      throw new Error(
-        "The AI marked the request ready but did not provide target files.",
-      );
-    }
-
-    return {
-      status,
-      instruction: resolvedInstruction,
-      targetFiles,
-    };
-  }
-
   const message = typeof data.message === "string" ? data.message.trim() : "";
 
-  const options = Array.isArray(data.options)
+  const options: AgentClarificationOption[] = Array.isArray(data.options)
     ? data.options
-        .filter((item) => Boolean(item && typeof item === "object"))
+        .filter(
+          (item): item is Record<string, unknown> =>
+            Boolean(item) && typeof item === "object" && !Array.isArray(item),
+        )
         .map((item): AgentClarificationOption | null => {
-          const value = item as Record<string, unknown>;
-
           if (
-            typeof value.id !== "string" ||
-            typeof value.label !== "string" ||
-            typeof value.instruction !== "string"
+            typeof item.id !== "string" ||
+            typeof item.label !== "string" ||
+            typeof item.instruction !== "string"
           ) {
             return null;
           }
 
+          const id = item.id.trim();
+          const label = item.label.trim();
+          const optionInstruction = item.instruction.trim();
+
+          if (!id || !label || !optionInstruction) {
+            return null;
+          }
+
           return {
-            id: value.id.trim(),
-
-            label: value.label.trim(),
-
-            instruction: value.instruction.trim(),
+            id,
+            label,
+            instruction: optionInstruction,
           };
         })
         .filter((item): item is AgentClarificationOption => item !== null)
     : [];
 
-  if (!message) {
+  const explicitCreateTarget = extractExplicitCreateTargetFile(instruction);
+
+  // Handle requests that are ready to proceed.
+  if (status === "ready") {
+    if (targetFiles.length === 0 && explicitCreateTarget) {
+      targetFiles.push(explicitCreateTarget);
+    }
+
+    if (targetFiles.length === 0) {
+      throw new Error(
+        `The AI marked the request ready but did not provide target files. Response: ${JSON.stringify(data)}`,
+      );
+    }
+
+    return {
+      status: "ready",
+      instruction: resolvedInstruction,
+      targetFiles,
+    };
+  }
+
+  // Recover from an incomplete clarification only when the request
+  // explicitly identifies a file that can be created.
+  if (!message || options.length === 0) {
+    if (explicitCreateTarget) {
+      return {
+        status: "ready",
+        instruction: resolvedInstruction,
+        targetFiles: [explicitCreateTarget],
+      };
+    }
+
     throw new Error(
-      "The AI requested clarification but did not provide a message.",
+      `The AI returned an incomplete clarification. Response: ${JSON.stringify(data)}`,
     );
   }
 
-  if (options.length === 0) {
-    throw new Error(
-      "The AI requested clarification but did not provide any options.",
-    );
-  }
-
+  // Return a valid clarification request.
   return {
-    status,
+    status: "clarification",
     instruction: resolvedInstruction,
     targetFiles: [],
     message,

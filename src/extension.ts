@@ -46,6 +46,7 @@ import {
   validateOllamaModelAvailable,
   FREECOPILOT_CONFIG_FILE,
   FreeCopilotModel,
+  getFreeCopilotModelForRole,
 } from "./config/modelConfig";
 
 export function activate(context: vscode.ExtensionContext) {
@@ -343,6 +344,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   private _agentAbortController: AbortController | null = null;
   private _webviewView: vscode.WebviewView | undefined;
   private _currentTask: AgentTask | undefined;
+  private _pendingAgentClarificationInstruction: string | null = null;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -415,20 +417,35 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           if (!instruction) {
             break;
           }
+          this._pendingAgentClarificationInstruction = null;
           await this.handleAgentRequest(instruction, modelId);
           break;
         }
         case "agentClarificationSelected": {
           const clarificationInstruction =
             typeof data.instruction === "string" ? data.instruction.trim() : "";
+
           if (!clarificationInstruction) {
             break;
           }
-          const modelId =
-            typeof data.modelId === "string" && data.modelId.trim()
-              ? data.modelId.trim()
-              : undefined;
-          await this.handleAgentRequest(clarificationInstruction, modelId);
+
+          const originalInstruction =
+            this._pendingAgentClarificationInstruction;
+          this._pendingAgentClarificationInstruction = null;
+
+          const combinedInstruction =
+            originalInstruction &&
+            !clarificationInstruction.includes(originalInstruction)
+              ? [
+                  "Original user request:",
+                  originalInstruction,
+                  "",
+                  "User's clarification:",
+                  clarificationInstruction,
+                ].join("\n")
+              : clarificationInstruction;
+
+          await this.handleAgentRequest(combinedInstruction);
           break;
         }
         case "agentClarificationRewrite": {
@@ -441,6 +458,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
             typeof data.modelId === "string" && data.modelId.trim()
               ? data.modelId.trim()
               : undefined;
+          this._pendingAgentClarificationInstruction = null;
           await this.handleAgentRequest(rewrittenInstruction, modelId);
           break;
         }
@@ -1354,33 +1372,15 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         role: "resolver" | "planner" | "changeGenerator",
         preferredModelId?: string,
       ): FreeCopilotModel => {
-        const model = preferredModelId
-          ? config.models.find(
-              (item) =>
-                getFreeCopilotModelId(item) === preferredModelId &&
-                item.roles?.includes(role),
-            )
-          : config.models.find((item) => item.roles?.includes(role));
-
-        if (!model) {
-          if (preferredModelId) {
-            const preferredModel = config.models.find(
-              (item) => getFreeCopilotModelId(item) === preferredModelId,
-            );
-
-            throw new Error(
-              `The selected model "${preferredModel?.name ?? preferredModelId}" does not support the "${role}" role.`,
-            );
-          }
-
-          throw new Error(
-            `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
-          );
-        }
+        const model = getFreeCopilotModelForRole(
+          config.models,
+          role,
+          preferredModelId,
+        );
 
         if (model.provider !== "ollama") {
           throw new Error(
-            `The "${role}" role currently supports only Ollama. Configured provider: ${model.provider}`,
+            `The "${role}" model "${model.name}" uses unsupported provider "${model.provider}".`,
           );
         }
 
@@ -1516,6 +1516,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        * -------------------------------------------------------
        */
       if (resolution.status === "clarification") {
+        this._pendingAgentClarificationInstruction = agentInstruction;
         this._webviewView?.webview.postMessage({
           command: "agentClarification",
 
