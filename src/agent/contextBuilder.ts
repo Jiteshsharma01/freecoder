@@ -7,6 +7,10 @@ import { KnowledgeGraph } from "../projectAnalysis/knowledgeGraph/types";
 
 import { AgentContext, FileContext, ProjectReference } from "./types";
 import { AgentResolutionContext } from "./taskPlanner";
+import {
+  extractWorkspaceFileReferences,
+  removeWorkspaceFileReferences,
+} from "../utils/workspaceFileContext";
 
 export interface FileCandidateResult {
   requestedName: string;
@@ -19,6 +23,7 @@ export async function buildAgentContext(
   analysis: ProjectAnalysis,
   instruction: string,
   targetFiles: string[],
+  referencedFiles: FileContext[] = [],
 ): Promise<AgentContext> {
   const currentFile = await getActiveFileContext(rootPath, targetFiles);
 
@@ -34,20 +39,16 @@ export async function buildAgentContext(
     instruction,
     analysis,
     rootPath,
-    // targetFiles,
   );
 
   const projectSummary = buildProjectSummary(analysis, projectReferences);
 
   return {
     currentFile: currentFile ?? undefined,
-
     relatedFiles,
-
+    referencedFiles,
     projectSummary,
-
     graphContext,
-
     projectReferences,
   };
 }
@@ -510,45 +511,29 @@ export async function buildAgentResolutionContext(
   analysis: ProjectAnalysis,
   instruction: string,
 ): Promise<AgentResolutionContext> {
-  /*
-   * ---------------------------------------------------------
-   * 1. ACTIVE FILE
-   * ---------------------------------------------------------
-   *
-   * Only collect the path of the currently active file.
-   * Do NOT read its contents during resolution.
-   */
+  // 1. Active file
   const activeFile = getActiveFilePath(rootPath);
 
-  /*
-   * ---------------------------------------------------------
-   * 2. EXPLICIT FILE
-   * ---------------------------------------------------------
-   *
-   * Example:
-   *
-   * "in this file:
-   *  apps\client\src\components\Header.tsx"
-   *
-   * This gives the resolver an explicit workspace target.
-   */
-  const explicitFile = extractExplicitTargetFile(instruction);
+  // 2. Extract explicitly attached context files
+  const referencedFiles = extractWorkspaceFileReferences(instruction);
 
-  /*
-   * ---------------------------------------------------------
-   * 3. CANDIDATE FILES
-   * ---------------------------------------------------------
-   *
-   * This performs workspace-level filename discovery only.
-   *
-   * It does NOT inspect file contents.
-   */
-  const candidateFiles = findCandidateFilePaths(instruction, analysis);
+  // 3. Exclude @ references from modification-target discovery
+  const targetDiscoveryInstruction = removeWorkspaceFileReferences(instruction);
+
+  // 4. Explicit modification target
+  const explicitFile = extractExplicitTargetFile(targetDiscoveryInstruction);
+
+  // 5. Candidate modification files
+  const candidateFiles = findCandidateFilePaths(
+    targetDiscoveryInstruction,
+    analysis,
+  );
 
   return {
     activeFile,
     explicitFile: explicitFile ?? undefined,
     candidateFiles,
+    referencedFiles,
   };
 }
 

@@ -1447,7 +1447,7 @@ export function getChatHtml(webviewUri: string): string {
                                 'placeholder="Rewrite the request more clearly..." ' +
                                 'style="' +
                                     'width:100%;' +
-                                    'min-height:60px;' +
+                                    'min-height:80px;' +
                                     'resize:vertical;' +
                                 '"' +
                             '></textarea>' +
