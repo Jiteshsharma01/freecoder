@@ -8,7 +8,7 @@ import {
   stringify as stringifyYaml,
 } from "yaml";
 
-export type FreeCopilotModelRole =
+export type FreeCoderModelRole =
   | "chat"
   | "edit"
   | "apply"
@@ -17,17 +17,17 @@ export type FreeCopilotModelRole =
   | "changeGenerator"
   | "embed";
 
-export interface FreeCopilotModelOptions {
+export interface FreeCoderModelOptions {
   [key: string]: unknown;
 }
 
-export interface FreeCopilotModel {
+export interface FreeCoderModel {
   name: string;
   provider: string;
   model: string;
   apiBase?: string;
-  roles?: FreeCopilotModelRole[];
-  options?: FreeCopilotModelOptions;
+  roles?: FreeCoderModelRole[];
+  options?: FreeCoderModelOptions;
 }
 
 export interface InstalledOllamaModel {
@@ -37,21 +37,21 @@ export interface InstalledOllamaModel {
   modifiedAt?: string;
 }
 
-export interface FreeCopilotConfig {
+export interface FreeCoderConfig {
   name: string;
   version: string;
   schema: string;
-  models: FreeCopilotModel[];
+  models: FreeCoderModel[];
 }
 
-export const FREECOPILOT_CONFIG_DIR = path.join(os.homedir(), ".freecopilot");
+export const FREECODER_CONFIG_DIR = path.join(os.homedir(), ".freecoder");
 
-export const FREECOPILOT_CONFIG_FILE = path.join(
-  FREECOPILOT_CONFIG_DIR,
+export const FREECODER_CONFIG_FILE = path.join(
+  FREECODER_CONFIG_DIR,
   "config.yaml",
 );
 
-function isFreeCopilotModelRole(value: unknown): value is FreeCopilotModelRole {
+function isFreeCoderModelRole(value: unknown): value is FreeCoderModelRole {
   return (
     value === "chat" ||
     value === "edit" ||
@@ -63,7 +63,7 @@ function isFreeCopilotModelRole(value: unknown): value is FreeCopilotModelRole {
   );
 }
 
-export const DEFAULT_FREECOPILOT_CONFIG: FreeCopilotConfig = {
+export const DEFAULT_FREECODER_CONFIG: FreeCoderConfig = {
   name: "Main Config",
   version: "1.0.0",
   schema: "v1",
@@ -85,26 +85,26 @@ export const DEFAULT_FREECOPILOT_CONFIG: FreeCopilotConfig = {
   ],
 };
 
-export async function ensureFreeCopilotConfig(): Promise<string> {
-  await fs.mkdir(FREECOPILOT_CONFIG_DIR, {
+export async function ensureFreeCoderConfig(): Promise<string> {
+  await fs.mkdir(FREECODER_CONFIG_DIR, {
     recursive: true,
   });
 
   try {
-    await fs.access(FREECOPILOT_CONFIG_FILE);
+    await fs.access(FREECODER_CONFIG_FILE);
   } catch {
     await fs.writeFile(
-      FREECOPILOT_CONFIG_FILE,
-      stringifyYaml(DEFAULT_FREECOPILOT_CONFIG),
+      FREECODER_CONFIG_FILE,
+      stringifyYaml(DEFAULT_FREECODER_CONFIG),
       "utf8",
     );
   }
 
-  return FREECOPILOT_CONFIG_FILE;
+  return FREECODER_CONFIG_FILE;
 }
 
-export async function loadFreeCopilotConfig(): Promise<FreeCopilotConfig> {
-  const configFile = await ensureFreeCopilotConfig();
+export async function loadFreeCoderConfig(): Promise<FreeCoderConfig> {
+  const configFile = await ensureFreeCoderConfig();
   const raw = await fs.readFile(configFile, "utf8");
 
   let parsed: unknown;
@@ -113,17 +113,17 @@ export async function loadFreeCopilotConfig(): Promise<FreeCopilotConfig> {
     parsed = parseYaml(raw);
   } catch (error: any) {
     throw new Error(
-      `Failed to parse FreeCopilot config.yaml: ${
+      `Failed to parse FreeCoder config.yaml: ${
         error?.message ?? "Invalid YAML"
       }`,
     );
   }
 
-  return validateFreeCopilotConfig(parsed);
+  return validateFreeCoderConfig(parsed);
 }
 
 export async function validateOllamaModelAvailable(
-  model: FreeCopilotModel,
+  model: FreeCoderModel,
 ): Promise<void> {
   if (model.provider.toLowerCase() !== "ollama") {
     throw new Error(
@@ -249,7 +249,7 @@ export async function addOllamaModelToConfig(
   apiBase = "http://localhost:11434",
 ): Promise<{
   added: boolean;
-  model: FreeCopilotModel;
+  model: FreeCoderModel;
 }> {
   const name = modelName.trim();
   const normalizedApiBase = apiBase.trim().replace(/\/+$/, "");
@@ -262,21 +262,21 @@ export async function addOllamaModelToConfig(
     throw new Error("Ollama API URL cannot be empty.");
   }
 
-  await ensureFreeCopilotConfig();
+  await ensureFreeCoderConfig();
 
-  const raw = await fs.readFile(FREECOPILOT_CONFIG_FILE, "utf8");
+  const raw = await fs.readFile(FREECODER_CONFIG_FILE, "utf8");
 
   const document = parseDocument(raw);
 
   if (document.errors.length > 0) {
     throw new Error(
-      `Failed to parse FreeCopilot config.yaml: ${document.errors
+      `Failed to parse FreeCoder config.yaml: ${document.errors
         .map((error) => error.message)
         .join("; ")}`,
     );
   }
 
-  const config = validateFreeCopilotConfig(document.toJSON());
+  const config = validateFreeCoderConfig(document.toJSON());
 
   // Avoid adding the same Ollama model twice.
   const existingModel = config.models.find(
@@ -293,10 +293,10 @@ export async function addOllamaModelToConfig(
   const modelsNode = document.get("models", true);
 
   if (!isSeq(modelsNode)) {
-    throw new Error("FreeCopilot config.yaml must contain a models sequence.");
+    throw new Error("FreeCoder config.yaml must contain a models sequence.");
   }
 
-  const newModel: FreeCopilotModel = {
+  const newModel: FreeCoderModel = {
     name,
     provider: "ollama",
     model: name,
@@ -306,7 +306,7 @@ export async function addOllamaModelToConfig(
 
   modelsNode.add(newModel);
 
-  await fs.writeFile(FREECOPILOT_CONFIG_FILE, document.toString(), "utf8");
+  await fs.writeFile(FREECODER_CONFIG_FILE, document.toString(), "utf8");
 
   return {
     added: true,
@@ -314,35 +314,35 @@ export async function addOllamaModelToConfig(
   };
 }
 
-export function validateFreeCopilotConfig(value: unknown): FreeCopilotConfig {
+export function validateFreeCoderConfig(value: unknown): FreeCoderConfig {
   if (!value || typeof value !== "object") {
-    throw new Error("FreeCopilot config.yaml must contain a YAML object.");
+    throw new Error("FreeCoder config.yaml must contain a YAML object.");
   }
 
   const data = value as Record<string, unknown>;
 
   if (typeof data.name !== "string" || !data.name.trim()) {
-    throw new Error("FreeCopilot config.yaml requires a non-empty 'name'.");
+    throw new Error("FreeCoder config.yaml requires a non-empty 'name'.");
   }
 
   if (typeof data.version !== "string" || !data.version.trim()) {
-    throw new Error("FreeCopilot config.yaml requires a non-empty 'version'.");
+    throw new Error("FreeCoder config.yaml requires a non-empty 'version'.");
   }
 
   if (typeof data.schema !== "string" || !data.schema.trim()) {
-    throw new Error("FreeCopilot config.yaml requires a non-empty 'schema'.");
+    throw new Error("FreeCoder config.yaml requires a non-empty 'schema'.");
   }
 
   if (!Array.isArray(data.models)) {
-    throw new Error("FreeCopilot config.yaml requires a 'models' array.");
+    throw new Error("FreeCoder config.yaml requires a 'models' array.");
   }
 
   const models = data.models.map((model, index) =>
-    validateFreeCopilotModel(model, index),
+    validateFreeCoderModel(model, index),
   );
 
   if (models.length === 0) {
-    throw new Error("FreeCopilot config.yaml must contain at least one model.");
+    throw new Error("FreeCoder config.yaml must contain at least one model.");
   }
 
   return {
@@ -353,12 +353,12 @@ export function validateFreeCopilotConfig(value: unknown): FreeCopilotConfig {
   };
 }
 
-function validateFreeCopilotModel(
+function validateFreeCoderModel(
   value: unknown,
   index: number,
-): FreeCopilotModel {
+): FreeCoderModel {
   if (!value || typeof value !== "object") {
-    throw new Error(`FreeCopilot model at index ${index} must be an object.`);
+    throw new Error(`FreeCoder model at index ${index} must be an object.`);
   }
 
   const data = value as Record<string, unknown>;
@@ -366,39 +366,39 @@ function validateFreeCopilotModel(
 
   if (typeof data.name !== "string" || !data.name.trim()) {
     throw new Error(
-      `FreeCopilot model #${modelNumber} requires a non-empty 'name'.`,
+      `FreeCoder model #${modelNumber} requires a non-empty 'name'.`,
     );
   }
 
   if (typeof data.provider !== "string" || !data.provider.trim()) {
     throw new Error(
-      `FreeCopilot model #${modelNumber} requires a non-empty 'provider'.`,
+      `FreeCoder model #${modelNumber} requires a non-empty 'provider'.`,
     );
   }
 
   if (typeof data.model !== "string" || !data.model.trim()) {
     throw new Error(
-      `FreeCopilot model #${modelNumber} requires a non-empty 'model'.`,
+      `FreeCoder model #${modelNumber} requires a non-empty 'model'.`,
     );
   }
 
   if (data.apiBase !== undefined && typeof data.apiBase !== "string") {
     throw new Error(
-      `FreeCopilot model #${modelNumber} has an invalid 'apiBase'.`,
+      `FreeCoder model #${modelNumber} has an invalid 'apiBase'.`,
     );
   }
 
   if (data.roles !== undefined && !Array.isArray(data.roles)) {
     throw new Error(
-      `FreeCopilot model #${modelNumber} has an invalid 'roles' value.`,
+      `FreeCoder model #${modelNumber} has an invalid 'roles' value.`,
     );
   }
 
   const roles = Array.isArray(data.roles)
     ? data.roles.map((role) => {
-        if (!isFreeCopilotModelRole(role)) {
+        if (!isFreeCoderModelRole(role)) {
           throw new Error(
-            `FreeCopilot model #${modelNumber} contains an unsupported model role: ${String(
+            `FreeCoder model #${modelNumber} contains an unsupported model role: ${String(
               role,
             )}.`,
           );
@@ -415,7 +415,7 @@ function validateFreeCopilotModel(
       Array.isArray(data.options))
   ) {
     throw new Error(
-      `FreeCopilot model #${modelNumber} has an invalid 'options' value.`,
+      `FreeCoder model #${modelNumber} has an invalid 'options' value.`,
     );
   }
 
@@ -425,24 +425,24 @@ function validateFreeCopilotModel(
     model: data.model.trim(),
     apiBase: typeof data.apiBase === "string" ? data.apiBase.trim() : undefined,
     roles,
-    options: data.options as FreeCopilotModelOptions | undefined,
+    options: data.options as FreeCoderModelOptions | undefined,
   };
 }
 
-export function getFreeCopilotModelId(model: FreeCopilotModel): string {
+export function getFreeCoderModelId(model: FreeCoderModel): string {
   return [model.provider, model.model].join(":").toLowerCase();
 }
 
-export function getFreeCopilotModelForRole(
-  models: FreeCopilotModel[],
-  role: FreeCopilotModelRole,
+export function getFreeCoderModelForRole(
+  models: FreeCoderModel[],
+  role: FreeCoderModelRole,
   preferredModelId?: string,
-): FreeCopilotModel {
+): FreeCoderModel {
   if (preferredModelId) {
     const normalizedId = preferredModelId.trim().toLowerCase();
 
     const preferredModel = models.find(
-      (model) => getFreeCopilotModelId(model) === normalizedId,
+      (model) => getFreeCoderModelId(model) === normalizedId,
     );
 
     if (!preferredModel) {
@@ -462,7 +462,7 @@ export function getFreeCopilotModelForRole(
 
   if (!model) {
     throw new Error(
-      `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
+      `No model is configured for the "${role}" role in ~/.freecoder/config.yaml.`,
     );
   }
 

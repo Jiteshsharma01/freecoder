@@ -2,8 +2,8 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { AgentTask, FileChange } from "./types";
 import {
-  getFreeCopilotModelId,
-  loadFreeCopilotConfig,
+  getFreeCoderModelId,
+  loadFreeCoderConfig,
 } from "../config/modelConfig";
 
 interface AIFileChange {
@@ -34,11 +34,11 @@ export async function generateFileChanges(
     throw new Error("No model is assigned to the change generator.");
   }
 
-  const config = await loadFreeCopilotConfig();
+  const config = await loadFreeCoderConfig();
 
   const model = config.models.find(
     (item) =>
-      getFreeCopilotModelId(item) === selectedModelId &&
+      getFreeCoderModelId(item) === selectedModelId &&
       item.roles?.includes("changeGenerator"),
   );
 
@@ -106,7 +106,7 @@ export async function generateFileChanges(
 
     return validateGeneratedChanges(parsed.changes, task, currentFiles);
   } catch (error: any) {
-    console.error("[FreeCopilot Agent] Change generation fetch failed:", {
+    console.error("[FreeCoder Agent] Change generation fetch failed:", {
       name: error?.name,
       message: error?.message,
       signalAborted: signal?.aborted,
@@ -203,7 +203,7 @@ async function readTargetFiles(
 
 function buildSystemPrompt(): string {
   return [
-    "You are the file-editing engine for FreeCopilot.",
+    "You are the file-editing engine for FreeCoder.",
     "",
     "The user has already reviewed and approved an agent plan.",
     "",

@@ -26,8 +26,8 @@ import {
   verifyChangesCanBeUndone,
 } from "./agent/applyChanges";
 import {
-  FREECOPILOT_DIFF_SCHEME,
-  FreeCopilotDiffProvider,
+  FREECODER_DIFF_SCHEME,
+  FreeCoderDiffProvider,
 } from "./agent/virtualDiffProvider";
 import { ProjectAnalysis } from "./projectAnalysis/types";
 import { validateProject } from "./agent/validator";
@@ -39,14 +39,14 @@ import {
 } from "./agent/contextBuilder";
 import {
   addOllamaModelToConfig,
-  ensureFreeCopilotConfig,
-  getFreeCopilotModelId,
-  loadFreeCopilotConfig,
+  ensureFreeCoderConfig,
+  getFreeCoderModelId,
+  loadFreeCoderConfig,
   listInstalledOllamaModels,
   validateOllamaModelAvailable,
-  FREECOPILOT_CONFIG_FILE,
-  FreeCopilotModel,
-  getFreeCopilotModelForRole,
+  FREECODER_CONFIG_FILE,
+  FreeCoderModel,
+  getFreeCoderModelForRole,
 } from "./config/modelConfig";
 import {
   extractWorkspaceFileReferences,
@@ -55,17 +55,17 @@ import {
 } from "./utils/workspaceFileContext";
 
 export function activate(context: vscode.ExtensionContext) {
-  const diffProvider = new FreeCopilotDiffProvider();
+  const diffProvider = new FreeCoderDiffProvider();
 
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(
-      FREECOPILOT_DIFF_SCHEME,
+      FREECODER_DIFF_SCHEME,
       diffProvider,
     ),
   );
   // Register Workspace Map Core Action Command
   const mapCmd = vscode.commands.registerCommand(
-    "freeCopilot.generateProjectMap",
+    "freeCoder.generateProjectMap",
     async () => {
       const rootPath = getWorkspaceRoot();
       if (!rootPath) {
@@ -86,7 +86,7 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
   const graphCmd = vscode.commands.registerCommand(
-    "freeCopilot.generateKnowledgeGraph",
+    "freeCoder.generateKnowledgeGraph",
     async () => {
       const rootPath = getWorkspaceRoot();
       if (!rootPath) {
@@ -114,14 +114,14 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(mapCmd, graphCmd);
 
   // Register Webview View Sidebar Provider Container interface
-  const chatProvider = new FreeCopilotViewProvider(
+  const chatProvider = new FreeCoderViewProvider(
     context.extensionUri,
     diffProvider,
     context,
   );
   const configSaveListener = vscode.workspace.onDidSaveTextDocument(
     async (document) => {
-      if (document.uri.fsPath !== FREECOPILOT_CONFIG_FILE) {
+      if (document.uri.fsPath !== FREECODER_CONFIG_FILE) {
         return;
       }
       await chatProvider.refreshConfiguredModels();
@@ -131,7 +131,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(configSaveListener);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
-      "freeCopilot.chatView",
+      "freeCoder.chatView",
       chatProvider,
       // 🔥 THE FIX: Pass the property here during registration so it binds to the sidebar lifecycle
       {
@@ -276,7 +276,7 @@ function shouldUseProjectContext(text: string): boolean {
   if (!normalized) {
     return false;
   }
-  // EXPLICIT PROJECT / FILE CONTEXT. These phrases clearly indicate that the user wants FreeCopilot to understand their workspace/code.
+  // EXPLICIT PROJECT / FILE CONTEXT. These phrases clearly indicate that the user wants FreeCoder to understand their workspace/code.
   const projectIndicators = [
     "my project",
     "this project",
@@ -339,11 +339,11 @@ function shouldUseProjectContext(text: string): boolean {
   return false;
 }
 
-class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
+class FreeCoderViewProvider implements vscode.WebviewViewProvider {
   private static readonly SELECTED_MODEL_STATE_KEY =
-    "freecopilot.selectedModelId";
+    "freecoder.selectedModelId";
   private static readonly ACTIVE_CONFIG_STATE_KEY =
-    "freecopilot.activeConfigPath";
+    "freecoder.activeConfigPath";
   // 1. Maintain a reference to the active AbortController to stop network streams
   private _activeAbortController: AbortController | null = null;
   private _agentAbortController: AbortController | null = null;
@@ -353,7 +353,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
-    private readonly _diffProvider: FreeCopilotDiffProvider,
+    private readonly _diffProvider: FreeCoderDiffProvider,
     private readonly _extensionContext: vscode.ExtensionContext,
   ) {}
 
@@ -374,7 +374,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
     // Intercept incoming interface pipeline events
     webviewView.webview.onDidReceiveMessage(async (data) => {
-      console.log("FreeCopilot WebView message:", data.command, data);
+      console.log("FreeCoder WebView message:", data.command, data);
       switch (data.command) {
         case "generateMap": {
           const rootPath = getWorkspaceRoot();
@@ -485,7 +485,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         case "discoverOllamaModels": {
           try {
             const installedModels = await listInstalledOllamaModels();
-            const config = await loadFreeCopilotConfig();
+            const config = await loadFreeCoderConfig();
             const defaultApiBase = "http://localhost:11434";
             const models = installedModels.map((installedModel) => {
               const alreadyConfigured = config.models.some(
@@ -630,17 +630,17 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   private getActiveConfigPath(): string {
     return (
       this._extensionContext.globalState.get<string>(
-        FreeCopilotViewProvider.ACTIVE_CONFIG_STATE_KEY,
-      ) ?? FREECOPILOT_CONFIG_FILE
+        FreeCoderViewProvider.ACTIVE_CONFIG_STATE_KEY,
+      ) ?? FREECODER_CONFIG_FILE
     );
   }
 
   private async openMainConfig(): Promise<void> {
     try {
-      await ensureFreeCopilotConfig();
+      await ensureFreeCoderConfig();
 
       const document = await vscode.workspace.openTextDocument(
-        vscode.Uri.file(FREECOPILOT_CONFIG_FILE),
+        vscode.Uri.file(FREECODER_CONFIG_FILE),
       );
 
       await vscode.window.showTextDocument(document, {
@@ -870,21 +870,21 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       if (validation.status === "failed") {
         vscode.window.showWarningMessage(
           [
-            `FreeCopilot applied ${task.changes.length} change${
+            `FreeCoder applied ${task.changes.length} change${
               task.changes.length === 1 ? "" : "s"
             }, but project validation found problems.`,
-            "Review the validation results in the FreeCopilot panel.",
+            "Review the validation results in the FreeCoder panel.",
           ].join(" "),
         );
       } else if (validation.status === "skipped") {
         vscode.window.showInformationMessage(
-          `FreeCopilot successfully applied ${task.changes.length} change${
+          `FreeCoder successfully applied ${task.changes.length} change${
             task.changes.length === 1 ? "" : "s"
           }. Project validation was skipped.`,
         );
       } else {
         vscode.window.showInformationMessage(
-          `FreeCopilot successfully applied ${task.changes.length} change${
+          `FreeCoder successfully applied ${task.changes.length} change${
             task.changes.length === 1 ? "" : "s"
           } and project validation passed.`,
         );
@@ -932,18 +932,18 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       | "changeGenerator"
       | "embed",
     requestedModelId?: string,
-  ): Promise<FreeCopilotModel> {
-    const config = await loadFreeCopilotConfig();
+  ): Promise<FreeCoderModel> {
+    const config = await loadFreeCoderConfig();
 
     const selectedModelId =
       requestedModelId ??
       this._extensionContext.globalState.get<string>(
-        FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+        FreeCoderViewProvider.SELECTED_MODEL_STATE_KEY,
       );
 
     if (selectedModelId) {
       const selectedModel = config.models.find(
-        (model) => getFreeCopilotModelId(model) === selectedModelId,
+        (model) => getFreeCoderModelId(model) === selectedModelId,
       );
 
       if (selectedModel) {
@@ -963,7 +963,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
     if (!fallbackModel) {
       throw new Error(
-        `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
+        `No model is configured for the "${role}" role in ~/.freecoder/config.yaml.`,
       );
     }
 
@@ -971,10 +971,10 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async selectModel(modelId: string): Promise<void> {
-    const config = await loadFreeCopilotConfig();
+    const config = await loadFreeCoderConfig();
 
     const model = config.models.find(
-      (item) => getFreeCopilotModelId(item) === modelId,
+      (item) => getFreeCoderModelId(item) === modelId,
     );
 
     if (!model) {
@@ -985,14 +985,14 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
     }
 
     await this._extensionContext.globalState.update(
-      FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+      FreeCoderViewProvider.SELECTED_MODEL_STATE_KEY,
       modelId,
     );
 
     this._webviewView?.webview.postMessage({
       command: "modelSelected",
       model: {
-        id: getFreeCopilotModelId(model),
+        id: getFreeCoderModelId(model),
         name: model.name,
         provider: model.provider,
         model: model.model,
@@ -1003,15 +1003,15 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
   private async sendConfiguredModels(): Promise<void> {
     const activeConfigPath = this.getActiveConfigPath();
-    const config = await loadFreeCopilotConfig();
+    const config = await loadFreeCoderConfig();
 
     const storedSelectedModelId =
       this._extensionContext.globalState.get<string>(
-        FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+        FreeCoderViewProvider.SELECTED_MODEL_STATE_KEY,
       );
 
     const storedModel = config.models.find(
-      (model) => getFreeCopilotModelId(model) === storedSelectedModelId,
+      (model) => getFreeCoderModelId(model) === storedSelectedModelId,
     );
 
     // The persisted selection is used by normal Chat,
@@ -1022,16 +1022,16 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
     if (!selectedModel) {
       throw new Error(
-        'No model is configured for the "chat" role in ~/.freecopilot/config.yaml.',
+        'No model is configured for the "chat" role in ~/.freecoder/config.yaml.',
       );
     }
 
-    const selectedModelId = getFreeCopilotModelId(selectedModel);
+    const selectedModelId = getFreeCoderModelId(selectedModel);
 
     // Repair stale or role-incompatible saved selections.
     if (selectedModelId !== storedSelectedModelId) {
       await this._extensionContext.globalState.update(
-        FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+        FreeCoderViewProvider.SELECTED_MODEL_STATE_KEY,
         selectedModelId,
       );
     }
@@ -1047,7 +1047,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       },
 
       models: config.models.map((model) => ({
-        id: getFreeCopilotModelId(model),
+        id: getFreeCoderModelId(model),
         name: model.name,
         provider: model.provider,
         model: model.model,
@@ -1076,14 +1076,14 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       | "planner"
       | "changeGenerator"
       | "embed",
-  ): Promise<FreeCopilotModel> {
-    const config = await loadFreeCopilotConfig();
+  ): Promise<FreeCoderModel> {
+    const config = await loadFreeCoderConfig();
 
     const model = config.models.find((item) => item.roles?.includes(role));
 
     if (!model) {
       throw new Error(
-        `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
+        `No model is configured for the "${role}" role in ~/.freecoder/config.yaml.`,
       );
     }
 
@@ -1093,7 +1093,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
   // Fully converted to real-time NDJSON chunk stream handling with Abort Signal integration
   private async handleChatMessage(data: any, webviewView: vscode.WebviewView) {
     const { text, attachment, attachmentType } = data;
-    let chatModel: FreeCopilotModel;
+    let chatModel: FreeCoderModel;
 
     try {
       chatModel = await this.getSelectedModel("chat");
@@ -1182,7 +1182,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         .map((issue) => `• ${issue.path}: ${issue.reason}`)
         .join("\n");
       void vscode.window.showWarningMessage(
-        `Free Copilot could not attach some referenced files:\n${issueDetails}`,
+        `Free Coder could not attach some referenced files:\n${issueDetails}`,
       );
     }
 
@@ -1205,7 +1205,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
         // NORMAL CHAT SYSTEM PROMPT
         const systemMessage = [
-          "You are Free Copilot, an expert software engineering assistant.",
+          "You are Free Coder, an expert software engineering assistant.",
           "",
           "You are running inside VS Code.",
           "",
@@ -1340,7 +1340,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
      */
     if (this.isAgentBusy()) {
       vscode.window.showWarningMessage(
-        "A FreeCopilot Agent task is already in progress. Complete or cancel it before starting another Agent task.",
+        "A FreeCoder Agent task is already in progress. Complete or cancel it before starting another Agent task.",
       );
 
       this._webviewView?.webview.postMessage({
@@ -1402,19 +1402,19 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        * task is running.
        * -------------------------------------------------------
        */
-      const config = await loadFreeCopilotConfig();
+      const config = await loadFreeCoderConfig();
 
       const selectedResolverModelId =
         requestedModelId ??
         this._extensionContext.globalState.get<string>(
-          FreeCopilotViewProvider.SELECTED_MODEL_STATE_KEY,
+          FreeCoderViewProvider.SELECTED_MODEL_STATE_KEY,
         );
 
       const getRoleModel = (
         role: "resolver" | "planner" | "changeGenerator",
         preferredModelId?: string,
-      ): FreeCopilotModel => {
-        const model = getFreeCopilotModelForRole(
+      ): FreeCoderModel => {
+        const model = getFreeCoderModelForRole(
           config.models,
           role,
           preferredModelId,
@@ -1436,14 +1436,14 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       const changeGeneratorModel = getRoleModel("changeGenerator");
 
       const modelSnapshot: AgentModelSnapshot = {
-        resolver: getFreeCopilotModelId(resolverModel),
-        planner: getFreeCopilotModelId(plannerModel),
-        changeGenerator: getFreeCopilotModelId(changeGeneratorModel),
+        resolver: getFreeCoderModelId(resolverModel),
+        planner: getFreeCoderModelId(plannerModel),
+        changeGenerator: getFreeCoderModelId(changeGeneratorModel),
       };
 
       const agentModelId = modelSnapshot.resolver;
 
-      const modelsToValidate = new Map<string, FreeCopilotModel>();
+      const modelsToValidate = new Map<string, FreeCoderModel>();
 
       for (const model of [resolverModel, plannerModel, changeGeneratorModel]) {
         const apiBase = (model.apiBase ?? "http://localhost:11434").replace(
@@ -1797,7 +1797,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const selection = await vscode.window.showWarningMessage(
-      "Undo all changes made by the last FreeCopilot Agent task?",
+      "Undo all changes made by the last FreeCoder Agent task?",
       {
         modal: true,
       },
@@ -1909,7 +1909,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       });
 
       vscode.window.showInformationMessage(
-        `FreeCopilot successfully undid ${task.changes.length} change${
+        `FreeCoder successfully undid ${task.changes.length} change${
           task.changes.length === 1 ? "" : "s"
         }.`,
       );
@@ -1923,7 +1923,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       });
 
       vscode.window.showErrorMessage(
-        `FreeCopilot could not undo the Agent changes: ${message}`,
+        `FreeCoder could not undo the Agent changes: ${message}`,
       );
     }
   }
@@ -1938,7 +1938,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       await generateProjectMap(rootPath, analysis);
       await generateKnowledgeGraph(analysis);
     } catch (error: any) {
-      console.error("FreeCopilot project analysis refresh failed:", error);
+      console.error("FreeCoder project analysis refresh failed:", error);
     }
   }
 
@@ -2027,12 +2027,12 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       await closeAgentDiffs();
     } catch (error) {
       console.warn(
-        "[FreeCopilot Agent] Failed to close Agent diff tabs after cancellation:",
+        "[FreeCoder Agent] Failed to close Agent diff tabs after cancellation:",
         error,
       );
     }
 
-    vscode.window.showInformationMessage("FreeCopilot Agent stopped.");
+    vscode.window.showInformationMessage("FreeCoder Agent stopped.");
   }
 }
 
