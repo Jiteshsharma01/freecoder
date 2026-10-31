@@ -1,6 +1,10 @@
 {
   "name": "freecoder",
+<<<<<<< HEAD
   "displayName": "FreeCoder",
+=======
+  "displayName": "freecoder",
+>>>>>>> f2e3f79040608158658888eeecb1562c3ff0fdb5
   "description": "A free AI assistant with project mapping and asset uploading.",
   "version": "0.0.4",
   "publisher": "local-itui",
@@ -18,7 +22,11 @@
         {
           "id": "free-coder-sidebar",
           "title": "Free Coder",
+<<<<<<< HEAD
           "icon": "$(comment-discussion)"
+=======
+          "icon": "$(robot)"
+>>>>>>> f2e3f79040608158658888eeecb1562c3ff0fdb5
         }
       ]
     },
@@ -26,7 +34,11 @@
       "free-coder-sidebar": [
         {
           "type": "webview",
+<<<<<<< HEAD
           "id": "freeCoder.chatView",
+=======
+          "id": "freecoder.chatView",
+>>>>>>> f2e3f79040608158658888eeecb1562c3ff0fdb5
           "name": "Chat Assistant",
           "icon": ""
         }
@@ -34,12 +46,20 @@
     },
     "commands": [
       {
+<<<<<<< HEAD
         "command": "freeCoder.generateProjectMap",
+=======
+        "command": "freecoder.generateProjectMap",
+>>>>>>> f2e3f79040608158658888eeecb1562c3ff0fdb5
         "title": "Free Coder: Generate Project Structure Map",
         "category": "Free Coder"
       },
       {
+<<<<<<< HEAD
         "command": "freeCoder.generateKnowledgeGraph",
+=======
+        "command": "freecoder.generateKnowledgeGraph",
+>>>>>>> f2e3f79040608158658888eeecb1562c3ff0fdb5
         "title": "Free Coder: Generate Knowledge Graph",
         "category": "Free Coder"
       }
