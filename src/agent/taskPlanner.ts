@@ -25,6 +25,7 @@ export interface AgentResolutionContext {
   activeFile?: string;
   explicitFile?: string;
   candidateFiles: string[];
+  referencedFiles: string[];
 }
 
 export interface AgentClarificationOption {
@@ -980,18 +981,45 @@ function buildResolutionSystemPrompt(): string {
     "Do not generate code.",
     "Do not generate file contents.",
     "Do not create a modification plan.",
-    "Do not return a target file path that is not present in the supplied workspace facts unless the user explicitly provided that exact path.",
     "",
     "Use the workspace facts provided by the extension.",
-    "Never invent files or paths.",
+    "Never invent existing files or paths.",
+    "",
+    "IMPORTANT DISTINCTION BETWEEN CONTEXT AND TARGET FILES:",
+    "",
+    "1. EXPLICITLY ATTACHED CONTEXT FILES:",
+    "- These are files supplied by the user using @file/path syntax.",
+    "- They are provided so the Agent can understand and reference their contents.",
+    "- They are read-only context by default.",
+    "- Do NOT automatically include them in targetFiles.",
+    "- Include one in targetFiles only when the user explicitly requests changes to that file.",
+    "",
+    "2. MODIFICATION TARGET FILES:",
+    "- targetFiles must contain files the Agent should create, modify, delete, or rename.",
+    "- Use explicit modification targets and relevant workspace candidates.",
+    "- Do not include files merely because they appear in the attached context list.",
+    "- Prefer the smallest safe set of modification targets.",
+    "",
+    "EXAMPLE:",
+    "User request:",
+    "Update Navbar.tsx to support a mobile menu.",
+    "Use TodoItem.tsx as a reference.",
+    "",
+    "Attached context:",
+    "- src/components/TodoItem.tsx",
+    "",
+    "Correct targetFiles:",
+    '["src/components/Navbar.tsx"]',
+    "",
+    "Do NOT include TodoItem.tsx unless the user explicitly asks to modify it.",
     "",
     "Return status 'ready' when the request is sufficiently clear.",
     "Return status 'clarification' when the request is ambiguous.",
     "",
     "Examples requiring clarification:",
-    "- Multiple files match the requested filename.",
+    "- Multiple files match the requested modification target.",
     "- The user refers to a file but several workspace files could match it.",
-    "- The request could reasonably refer to different targets.",
+    "- The request could reasonably refer to different modification targets.",
     "",
     "For clarification:",
     "- Do not guess.",
@@ -1005,6 +1033,7 @@ function buildResolutionSystemPrompt(): string {
     "- If the user specifies a filename and asks for the root directory, use that filename as a workspace-relative root path.",
     "- Always include an explicitly requested new file in targetFiles.",
     "- If a file creation request does not specify a filename, request clarification.",
+    "- Do not use an attached context file as a new-file target just because its path is explicitly mentioned.",
     "",
     "Return ONLY valid JSON.",
     "Do not use markdown.",
@@ -1041,32 +1070,43 @@ function buildResolutionPrompt(
 ): string {
   const sections: string[] = [];
 
+  // USER REQUEST
   sections.push(
     "================ USER REQUEST ================",
     instruction,
     "============== END USER REQUEST ==============",
   );
 
+  // WORKSPACE FACTS
   sections.push("", "================ WORKSPACE FACTS =============");
 
-  if (context.activeFile) {
-    sections.push(`ACTIVE FILE: ${context.activeFile}`);
-  } else {
-    sections.push("ACTIVE FILE: none");
-  }
+  sections.push(`ACTIVE FILE: ${context.activeFile ?? "none"}`);
 
   if (context.explicitFile) {
-    sections.push(`EXPLICIT FILE: ${context.explicitFile}`);
+    sections.push(`EXPLICIT MODIFICATION TARGET: ${context.explicitFile}`);
+  }
+
+  if (context.referencedFiles?.length) {
+    sections.push(
+      "",
+      "EXPLICITLY ATTACHED CONTEXT FILES (READ-ONLY REFERENCES):",
+      ...context.referencedFiles.map((file) => `- ${file}`),
+      "",
+      "These files were explicitly provided for context.",
+      "They are NOT automatically modification targets.",
+    );
+  } else {
+    sections.push("", "EXPLICITLY ATTACHED CONTEXT FILES: none");
   }
 
   if (context.candidateFiles.length > 0) {
     sections.push(
       "",
-      "CANDIDATE FILES:",
+      "CANDIDATE MODIFICATION FILES:",
       ...context.candidateFiles.map((file) => `- ${file}`),
     );
   } else {
-    sections.push("CANDIDATE FILES: none identified");
+    sections.push("", "CANDIDATE MODIFICATION FILES: none identified");
   }
 
   sections.push("============== END WORKSPACE FACTS ===========");

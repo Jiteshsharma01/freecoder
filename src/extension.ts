@@ -48,6 +48,11 @@ import {
   FreeCopilotModel,
   getFreeCopilotModelForRole,
 } from "./config/modelConfig";
+import {
+  extractWorkspaceFileReferences,
+  readWorkspaceContextFiles,
+  formatWorkspaceFileContext,
+} from "./utils/workspaceFileContext";
 
 export function activate(context: vscode.ExtensionContext) {
   const diffProvider = new FreeCopilotDiffProvider();
@@ -1153,9 +1158,37 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    const fileReferences = extractWorkspaceFileReferences(text);
+    const workspaceContext = await readWorkspaceContextFiles(fileReferences);
+
+    // Do not send the request if any explicitly referenced file is unavailable.
+    if (workspaceContext.issues.length > 0) {
+      const issueDetails = workspaceContext.issues
+        .map((issue) => `• ${issue.path}: ${issue.reason}`)
+        .join("\n");
+
+      webviewView.webview.postMessage({
+        command: "showError",
+        text: `Unable to attach the requested file context. Please correct the following paths and try again:\n\n${issueDetails}`,
+      });
+      return;
+    }
+
+    const referencedFileContext = formatWorkspaceFileContext(
+      workspaceContext.files,
+    );
+    if (workspaceContext.issues.length > 0) {
+      const issueDetails = workspaceContext.issues
+        .map((issue) => `• ${issue.path}: ${issue.reason}`)
+        .join("\n");
+      void vscode.window.showWarningMessage(
+        `Free Copilot could not attach some referenced files:\n${issueDetails}`,
+      );
+    }
+
     // FINAL PROMPT
     const finalPromptWithContext =
-      text + attachedFileContext + projectContextText;
+      text + attachedFileContext + projectContextText + referencedFileContext;
 
     // START STREAM UI
     webviewView.webview.postMessage({
@@ -1197,6 +1230,15 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
           "performed the modification.",
           "",
           "When context is provided, prefer it over assumptions.",
+          "When files are included in [USER ATTACHED FILE CONTEXT],",
+          "they were explicitly provided by the user.",
+          "Use their actual contents when answering.",
+          "Treat these files as read-only context.",
+          "Do not assume referenced files are modification targets.",
+          "When multiple files are included in the user attached file context,",
+          "you MUST inspect and consider every attached file.",
+          "Explain each attached file separately when the user asks to explain them.",
+          "Do not focus only on the first attached file.",
         ].join("\n");
 
         const payload = {
@@ -1428,6 +1470,8 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         ),
       );
 
+      if (signal.aborted) { return; }
+
       /*
        * -------------------------------------------------------
        * 4. Show Agent UI.
@@ -1444,13 +1488,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       /*
        * -------------------------------------------------------
        * 5. Analyze workspace.
-       *
-       * This gives the resolver factual information about
-       * the project and its files.
-       *
-       * IMPORTANT:
-       * No graph is loaded here.
-       * No related file contents are loaded here.
        * -------------------------------------------------------
        */
       const analysis = await analyzeProject(rootPath);
@@ -1463,16 +1500,13 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        * -------------------------------------------------------
        * 6. Build LIGHTWEIGHT resolution context.
        *
-       * This contains only:
+       * Contains:
        * - active file path
-       * - explicit file path
+       * - explicit modification target
        * - candidate workspace files
+       * - explicitly referenced @file paths
        *
-       * It intentionally does NOT contain:
-       * - full file contents
-       * - related file contents
-       * - graph context
-       * - project-wide references
+       * Does NOT contain full file contents.
        * -------------------------------------------------------
        */
       const resolutionContext = await buildAgentResolutionContext(
@@ -1487,7 +1521,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
       /*
        * -------------------------------------------------------
-       * 7. Let Qwen understand the request.
+       * 7. Resolve the user's request.
        * -------------------------------------------------------
        */
       const resolution = await resolveAgentRequest(
@@ -1503,32 +1537,64 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
       /*
        * -------------------------------------------------------
-       * 8. CLARIFICATION
+       * 8. CLARIFICATION.
        *
-       * If the request is ambiguous, stop the Agent flow here.
-       *
-       * Do NOT:
-       * - load the Knowledge Graph
-       * - read related files
-       * - search project references
-       * - create an AgentTask
-       * - generate an Agent plan
+       * Stop here when the request is ambiguous.
+       * Do not read files or generate a plan.
        * -------------------------------------------------------
        */
       if (resolution.status === "clarification") {
         this._pendingAgentClarificationInstruction = agentInstruction;
         this._webviewView?.webview.postMessage({
           command: "agentClarification",
-
           message: resolution.message ?? "Please clarify your request.",
-
           options: resolution.options ?? [],
-
           allowRewrite: resolution.allowRewrite !== false,
         });
 
         return;
       }
+
+      /*
+       * -------------------------------------------------------
+       * 8A. LOAD EXPLICITLY REFERENCED CONTEXT FILES.
+       *
+       * Read files provided using:
+       *
+       * @src/components/Navbar.tsx
+       * @src/components/TodoItem.tsx
+       *
+       * These files are read-only context.
+       * They are NOT automatically modification targets.
+       * -------------------------------------------------------
+       */
+      const referencedFileResult = await readWorkspaceContextFiles(
+        resolutionContext.referencedFiles ?? [],
+      );
+
+      if (signal.aborted) {
+        return;
+      }
+
+      /*
+       * Do not continue if any explicitly referenced file
+       * could not be loaded.
+       */
+      if (referencedFileResult.issues.length > 0) {
+        const issueDetails = referencedFileResult.issues
+          .map((issue) => `- ${issue.path}: ${issue.reason}`)
+          .join("\n");
+
+        throw new Error(`Unable to load Agent context files:\n${issueDetails}`);
+      }
+
+      /*
+       * Convert workspace files to Agent FileContext.
+       */
+      const referencedFiles = referencedFileResult.files.map((file) => ({
+        path: file.path,
+        content: file.content,
+      }));
 
       /*
        * -------------------------------------------------------
@@ -1539,9 +1605,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        */
       this._webviewView?.webview.postMessage({
         command: "agentProgress",
-
         stage: "context",
-
         text: "Reviewing relevant project context...",
       });
 
@@ -1554,9 +1618,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       /*
        * Generate the graph only when one does not already exist.
        */
-      if (!graph) {
-        graph = await generateKnowledgeGraph(analysis);
-      }
+      graph ??= await generateKnowledgeGraph(analysis);
 
       if (signal.aborted) {
         return;
@@ -1566,8 +1628,15 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        * -------------------------------------------------------
        * 10. Build FULL Agent context.
        *
-       * IMPORTANT:
-       * targetFiles comes from the request-resolution stage.
+       * Includes:
+       * - active file
+       * - related files
+       * - referenced file contents
+       * - project summary
+       * - graph context
+       * - project references
+       *
+       * targetFiles remains separate from referencedFiles.
        * -------------------------------------------------------
        */
       const context = await buildAgentContext(
@@ -1576,6 +1645,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
         analysis,
         resolution.instruction,
         resolution.targetFiles,
+        referencedFiles,
       );
 
       if (signal.aborted) {
@@ -1589,9 +1659,7 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        */
       this._webviewView?.webview.postMessage({
         command: "agentProgress",
-
         stage: "plan",
-
         text: "Creating the agent plan...",
       });
 
@@ -1608,21 +1676,14 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
       /*
        * -------------------------------------------------------
-       * 12. Safety boundary.
-       *
-       * The resolver already determined that the request was
-       * clear, but the planner is still allowed to request
-       * clarification if the richer context reveals ambiguity.
+       * 12. Planner clarification safety boundary.
        * -------------------------------------------------------
        */
       if (plan.status === "clarification") {
         this._webviewView?.webview.postMessage({
           command: "agentClarification",
-
           message: plan.clarificationMessage ?? "Please clarify your request.",
-
           options: plan.clarificationOptions ?? [],
-
           allowRewrite: plan.allowRewrite !== false,
         });
 
@@ -1632,10 +1693,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
       /*
        * -------------------------------------------------------
        * 13. Create the AgentTask.
-       *
-       * The request is now resolved and the planner has produced
-       * a valid plan, so _currentTask can safely contain an
-       * AgentTask.
        * -------------------------------------------------------
        */
       const task: AgentTask = {
@@ -1656,13 +1713,9 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
         changes: plan.changes.map((change) => ({
           path: change.path,
-
           operation: change.operation,
-
           originalPath: change.originalPath,
-
           newPath: change.newPath,
-
           explanation: change.reason,
         })),
 
@@ -1678,15 +1731,12 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
        */
       this._webviewView?.webview.postMessage({
         command: "agentProgress",
-
         stage: "planApproval",
-
         text: "Review the proposed plan.",
       });
 
       this._webviewView?.webview.postMessage({
         command: "agentPlan",
-
         plan: task,
       });
     } catch (error: any) {
@@ -1703,7 +1753,6 @@ class FreeCopilotViewProvider implements vscode.WebviewViewProvider {
 
       this._webviewView?.webview.postMessage({
         command: "agentExecutionFailed",
-
         text: message,
       });
 

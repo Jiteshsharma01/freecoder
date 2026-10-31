@@ -33,6 +33,7 @@ export interface ProjectReference {
 export interface AgentContext {
   currentFile?: FileContext;
   relatedFiles: FileContext[];
+  referencedFiles?: FileContext[];
   projectSummary?: string;
   graphContext?: GraphContext;
   projectReferences?: ProjectReference[];
