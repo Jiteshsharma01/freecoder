@@ -1,13 +1,13 @@
 import * as assert from "assert";
 
 import {
-  FreeCopilotModel,
-  getFreeCopilotModelForRole,
-  getFreeCopilotModelId,
+  FreeCoderModel,
+  getFreeCoderModelForRole,
+  getFreeCoderModelId,
 } from "../../config/modelConfig";
 
-suite("FreeCopilot model configuration", () => {
-  const models: FreeCopilotModel[] = [
+suite("FreeCoder model configuration", () => {
+  const models: FreeCoderModel[] = [
     {
       name: "Qwen 3",
       provider: "ollama",
@@ -30,19 +30,19 @@ suite("FreeCopilot model configuration", () => {
 
   test("creates a stable model ID", () => {
     assert.strictEqual(
-      getFreeCopilotModelId(models[0]),
+      getFreeCoderModelId(models[0]),
       "ollama:qwen3-coder:30b",
     );
   });
 
   test("selects the first model assigned to a role", () => {
-    const model = getFreeCopilotModelForRole(models, "planner");
+    const model = getFreeCoderModelForRole(models, "planner");
 
     assert.strictEqual(model.name, "Qwen Edit");
   });
 
   test("uses the preferred model when it supports the role", () => {
-    const model = getFreeCopilotModelForRole(
+    const model = getFreeCoderModelForRole(
       models,
       "resolver",
       "ollama:qwen3-coder:30b",
@@ -54,14 +54,14 @@ suite("FreeCopilot model configuration", () => {
   test("rejects a preferred model without the requested role", () => {
     assert.throws(
       () =>
-        getFreeCopilotModelForRole(models, "planner", "ollama:qwen3-coder:30b"),
+        getFreeCoderModelForRole(models, "planner", "ollama:qwen3-coder:30b"),
       /does not support the "planner" role/,
     );
   });
 
   test("rejects a role that has no configured model", () => {
     assert.throws(
-      () => getFreeCopilotModelForRole(models, "apply"),
+      () => getFreeCoderModelForRole(models, "apply"),
       /No model is configured for the "apply" role/,
     );
   });
@@ -69,7 +69,7 @@ suite("FreeCopilot model configuration", () => {
   test("rejects an unknown preferred model ID", () => {
     assert.throws(
       () =>
-        getFreeCopilotModelForRole(models, "resolver", "ollama:missing-model"),
+        getFreeCoderModelForRole(models, "resolver", "ollama:missing-model"),
       /was not found/,
     );
   });

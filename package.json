@@ -1,6 +1,6 @@
 {
-  "name": "freecopilot",
-  "displayName": "FreeCopilot",
+  "name": "freecoder",
+  "displayName": "freecoder",
   "description": "A free AI assistant with project mapping and asset uploading.",
   "version": "0.0.4",
   "publisher": "local-itui",
@@ -16,17 +16,17 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "free-copilot-sidebar",
-          "title": "Free Copilot",
-          "icon": "$(comment-discussion)"
+          "id": "free-coder-sidebar",
+          "title": "Free Coder",
+          "icon": "$(robot)"
         }
       ]
     },
     "views": {
-      "free-copilot-sidebar": [
+      "free-coder-sidebar": [
         {
           "type": "webview",
-          "id": "freeCopilot.chatView",
+          "id": "freecoder.chatView",
           "name": "Chat Assistant",
           "icon": ""
         }
@@ -34,14 +34,14 @@
     },
     "commands": [
       {
-        "command": "freeCopilot.generateProjectMap",
-        "title": "Free Copilot: Generate Project Structure Map",
-        "category": "Free Copilot"
+        "command": "freecoder.generateProjectMap",
+        "title": "Free Coder: Generate Project Structure Map",
+        "category": "Free Coder"
       },
       {
-        "command": "freeCopilot.generateKnowledgeGraph",
-        "title": "Free Copilot: Generate Knowledge Graph",
-        "category": "Free Copilot"
+        "command": "freecoder.generateKnowledgeGraph",
+        "title": "Free Coder: Generate Knowledge Graph",
+        "category": "Free Coder"
       }
     ]
   },

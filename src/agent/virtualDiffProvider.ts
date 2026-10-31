@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 
-export const FREECOPILOT_DIFF_SCHEME = "freecopilot-diff";
+export const FREECODER_DIFF_SCHEME = "freecoder-diff";
 
 interface VirtualDocumentEntry {
   uri: vscode.Uri;
@@ -8,7 +8,7 @@ interface VirtualDocumentEntry {
   originalPath: string;
 }
 
-export class FreeCopilotDiffProvider
+export class FreeCoderDiffProvider
   implements vscode.TextDocumentContentProvider, vscode.Disposable
 {
   private readonly documents = new Map<string, VirtualDocumentEntry>();
@@ -67,6 +67,6 @@ export function createDiffUri(
   const encodedPath = encodeURIComponent(changePath.replace(/\\/g, "/"));
 
   return vscode.Uri.parse(
-    `${FREECOPILOT_DIFF_SCHEME}://diff/${encodedPath}?side=${side}`,
+    `${FREECODER_DIFF_SCHEME}://diff/${encodedPath}?side=${side}`,
   );
 }

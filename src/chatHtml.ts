@@ -181,7 +181,7 @@ export function getChatHtml(webviewUri: string): string {
         </div>
 
         <script>
-            console.log('FreeCopilot WebView loaded');
+            console.log('FreeCoder WebView loaded');
             const vscode = acquireVsCodeApi();
             let base64Attachment = null;
             let attachmentName = null;
@@ -2117,7 +2117,7 @@ export function getChatHtml(webviewUri: string): string {
                 */
                 agentProgressDiv.innerHTML =
                     '<div style="font-weight: 600;">' +
-                        '🧠 FreeCopilot Agent' +
+                        '🧠 FreeCoder Agent' +
                     '</div>' +
 
                     '<div ' +
@@ -2803,7 +2803,7 @@ export function getChatHtml(webviewUri: string): string {
                 }
             });
 
-            console.log('FreeCopilot WebView initialization complete');
+            console.log('FreeCoder WebView initialization complete');
         </script>
     </body>
     </html>`;

@@ -1,13 +1,13 @@
 
-# 🚀 Free AI Copilot for VS Code
+# 🚀 Free AI Coder for VS Code
 
-A lightweight, private, and customizable AI code assistant sidebar. FreeCopilot connects directly to locally running AI models such as Ollama, giving you direct control over your development environment and project context.
+A lightweight, private, and customizable AI code assistant sidebar. FreeCoder connects directly to locally running AI models such as Ollama, giving you direct control over your development environment and project context.
 
 ## ✨ Core Features
 
 * **🦙 Local AI Support:** Connects directly to local engines like Ollama running coding models such as `qwen3-coder:30b`.
 * **🗺️ Project Structure Mapping:** Generates a `project_blueprint.md` project overview to give the AI a high-level understanding of the project's structure.
-* **🕸️ Knowledge Graph & Visualization:** Analyzes source-file relationships such as imports and dependencies, generates a local `.freecopilot/knowledge-graph.json`, and provides an interactive visual representation of the project's architecture.
+* **🕸️ Knowledge Graph & Visualization:** Analyzes source-file relationships such as imports and dependencies, generates a local `.freecoder/knowledge-graph.json`, and provides an interactive visual representation of the project's architecture.
 * **🤖 AI Coding Agent:** Communicate directly with the currently active file or related project files. The Agent analyzes project context, creates a change plan, generates proposed file modifications, opens a VS Code diff for review, and applies approved changes through VS Code's workspace editing APIs.
 * **🎯 Active File Context:** Automatically understands the file currently open in the VS Code editor, including the selected code when relevant.
 * **🔎 Project Reference Analysis:** Searches relevant project source, test, and configuration files to identify references when handling project-wide requests such as renaming or replacing a symbol.
@@ -20,7 +20,7 @@ A lightweight, private, and customizable AI code assistant sidebar. FreeCopilot 
 
 ## 🧠 Project Analysis, Mapping & Knowledge Graph
 
-FreeCopilot uses a technology-agnostic project analysis layer as the foundation for its project map, knowledge graph, and Agent context.
+FreeCoder uses a technology-agnostic project analysis layer as the foundation for its project map, knowledge graph, and Agent context.
 
 The architecture is designed to support different project types and frameworks, including:
 
@@ -125,7 +125,7 @@ src/app/page.tsx
 
 The generated graph is stored locally at:
 
-.freecopilot/
+.freecoder/
 └── knowledge-graph.json
 
 The graph can be opened in a dedicated VS Code visualization to explore project relationships.
@@ -138,7 +138,7 @@ The Knowledge Graph answers:
 
 The AI Agent is designed to let you communicate directly with the file you are currently working on or with relevant parts of the project.
 
-Instead of manually attaching files to every request, FreeCopilot can use:
+Instead of manually attaching files to every request, FreeCoder can use:
 
 The active VS Code file
 Selected code
@@ -211,7 +211,7 @@ At this stage no project files have been modified.
 
 2. Code Change Review
 
-After the plan is approved, FreeCopilot asks the AI to generate the exact proposed file contents and opens the resulting changes in the VS Code diff editor.
+After the plan is approved, FreeCoder asks the AI to generate the exact proposed file contents and opens the resulting changes in the VS Code diff editor.
 
 🔍 Review Changes
 
@@ -243,7 +243,7 @@ For project-wide instructions such as:
 
 Rename TodoList to TodoCollection everywhere.
 
-FreeCopilot can search relevant source, test, and configuration files for references to the requested identifier.
+FreeCoder can search relevant source, test, and configuration files for references to the requested identifier.
 
 This allows the Agent to identify candidate files beyond the currently active file.
 
@@ -307,7 +307,7 @@ Download and install Ollama.
 Pull the target coding model:
 
 ollama pull qwen3-coder:30b
-Keep the Ollama application/background server running while using FreeCopilot.
+Keep the Ollama application/background server running while using FreeCoder.
 
 The current Agent planning and code-change generation pipeline uses the local Ollama model.
 
@@ -371,7 +371,7 @@ VS Code Diff
     ↓
 Apply All Changes
 
-FreeCopilot can then generate a proposed implementation such as:
+FreeCoder can then generate a proposed implementation such as:
 
 const buttonClickHandle = () => {
     alert("Button clicked");
@@ -386,11 +386,11 @@ If this extension was shared with you privately as a standalone bundle file:
 Open VS Code and navigate to the Extensions tab (Ctrl+Shift+X or Cmd+Shift+X).
 Click the three dots (...) button positioned in the top-right corner of the Extensions panel.
 Choose Install from VSIX... from the dropdown.
-Select the freecopilot-0.0.1.vsix file from your local disk and open it.
+Select the freecoder-0.0.1.vsix file from your local disk and open it.
 Reload VS Code if requested.
 🚧 Current Development Direction
 
-FreeCopilot is being developed toward a project-aware coding agent rather than a simple chat assistant.
+FreeCoder is being developed toward a project-aware coding agent rather than a simple chat assistant.
 
 The current foundation is:
 

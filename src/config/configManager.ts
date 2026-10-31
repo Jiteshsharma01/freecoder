@@ -3,14 +3,14 @@ import * as path from "path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import {
-  FREECOPILOT_CONFIG_DIR,
-  FREECOPILOT_CONFIG_FILE,
-  FreeCopilotConfig,
-  loadFreeCopilotConfig,
-  validateFreeCopilotConfig,
+  FREECODER_CONFIG_DIR,
+  FREECODER_CONFIG_FILE,
+  FreeCoderConfig,
+  loadFreeCoderConfig,
+  validateFreeCoderConfig,
 } from "./modelConfig";
 
-export interface FreeCopilotConfigInfo {
+export interface FreeCoderConfigInfo {
   name: string;
   fileName: string;
   filePath: string;
@@ -18,16 +18,16 @@ export interface FreeCopilotConfigInfo {
 
 const SUPPORTED_CONFIG_EXTENSIONS = new Set([".yaml", ".yml"]);
 
-export async function listFreeCopilotConfigs(): Promise<
-  FreeCopilotConfigInfo[]
+export async function listFreeCoderConfigs(): Promise<
+  FreeCoderConfigInfo[]
 > {
-  await fs.mkdir(FREECOPILOT_CONFIG_DIR, { recursive: true });
+  await fs.mkdir(FREECODER_CONFIG_DIR, { recursive: true });
 
-  const entries = await fs.readdir(FREECOPILOT_CONFIG_DIR, {
+  const entries = await fs.readdir(FREECODER_CONFIG_DIR, {
     withFileTypes: true,
   });
 
-  const configs: FreeCopilotConfigInfo[] = [];
+  const configs: FreeCoderConfigInfo[] = [];
 
   for (const entry of entries) {
     if (!entry.isFile()) {
@@ -40,12 +40,12 @@ export async function listFreeCopilotConfigs(): Promise<
       continue;
     }
 
-    const filePath = path.join(FREECOPILOT_CONFIG_DIR, entry.name);
+    const filePath = path.join(FREECODER_CONFIG_DIR, entry.name);
 
     try {
       const raw = await fs.readFile(filePath, "utf8");
 
-      const config = validateFreeCopilotConfig(parseYaml(raw));
+      const config = validateFreeCoderConfig(parseYaml(raw));
 
       configs.push({
         name: config.name,
@@ -54,7 +54,7 @@ export async function listFreeCopilotConfigs(): Promise<
       });
     } catch (error) {
       console.warn(
-        `[FreeCopilot] Skipping invalid config "${entry.name}":`,
+        `[FreeCoder] Skipping invalid config "${entry.name}":`,
         error,
       );
     }
@@ -63,34 +63,34 @@ export async function listFreeCopilotConfigs(): Promise<
   return configs.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function loadFreeCopilotConfigFile(
+export async function loadFreeCoderConfigFile(
   filePath: string,
-): Promise<FreeCopilotConfig> {
+): Promise<FreeCoderConfig> {
   const normalizedPath = path.resolve(filePath);
 
-  const configDirectory = path.resolve(FREECOPILOT_CONFIG_DIR);
+  const configDirectory = path.resolve(FREECODER_CONFIG_DIR);
 
   if (
-    normalizedPath !== path.resolve(FREECOPILOT_CONFIG_FILE) &&
+    normalizedPath !== path.resolve(FREECODER_CONFIG_FILE) &&
     !normalizedPath.startsWith(`${configDirectory}${path.sep}`)
   ) {
     throw new Error(
-      "FreeCopilot configuration files must be inside ~/.freecopilot.",
+      "FreeCoder configuration files must be inside ~/.freecoder.",
     );
   }
 
   const raw = await fs.readFile(normalizedPath, "utf8");
 
-  return validateFreeCopilotConfig(parseYaml(raw));
+  return validateFreeCoderConfig(parseYaml(raw));
 }
 
-export async function createFreeCopilotConfig(
+export async function createFreeCoderConfig(
   fileName: string,
-  config: FreeCopilotConfig,
+  config: FreeCoderConfig,
 ): Promise<string> {
   const safeFileName = normalizeConfigFileName(fileName);
 
-  const filePath = path.join(FREECOPILOT_CONFIG_DIR, safeFileName);
+  const filePath = path.join(FREECODER_CONFIG_DIR, safeFileName);
 
   await fs.writeFile(filePath, stringifyYaml(config), "utf8");
 
@@ -98,11 +98,11 @@ export async function createFreeCopilotConfig(
 }
 
 export async function ensureMainConfig(): Promise<string> {
-  await fs.mkdir(FREECOPILOT_CONFIG_DIR, { recursive: true });
+  await fs.mkdir(FREECODER_CONFIG_DIR, { recursive: true });
 
-  await loadFreeCopilotConfig();
+  await loadFreeCoderConfig();
 
-  return FREECOPILOT_CONFIG_FILE;
+  return FREECODER_CONFIG_FILE;
 }
 
 function normalizeConfigFileName(fileName: string): string {
