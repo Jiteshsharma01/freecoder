@@ -10,7 +10,7 @@ export async function generateProjectMap(
     const outputDirectory =
         path.join(
             rootPath,
-            '.freecopilot'
+            '.freecoder'
         );
 
     await fs.mkdir(

@@ -10,7 +10,7 @@ import {
 export async function loadKnowledgeGraph(
   rootPath: string,
 ): Promise<KnowledgeGraph | null> {
-  const graphPath = path.join(rootPath, ".freecopilot", "knowledge-graph.json");
+  const graphPath = path.join(rootPath, ".freecoder", "knowledge-graph.json");
 
   try {
     const raw = await fs.readFile(graphPath, "utf8");
@@ -33,7 +33,7 @@ export async function saveKnowledgeGraph(
   rootPath: string,
   graph: KnowledgeGraph,
 ): Promise<string> {
-  const outputDirectory = path.join(rootPath, ".freecopilot");
+  const outputDirectory = path.join(rootPath, ".freecoder");
   await fs.mkdir(outputDirectory, { recursive: true });
   const outputPath = path.join(outputDirectory, "knowledge-graph.json");
   await fs.writeFile(outputPath, JSON.stringify(graph, null, 2), "utf8");

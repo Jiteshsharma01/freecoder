@@ -1,12 +1,10 @@
 import { isFileDeletionRequest } from "./requestClassifier";
 import { extractJsonObject } from "./changeGenerator";
-import { AgentContext, FileChange } from "./types";
-import { ProjectAnalysis } from "../projectAnalysis/types";
-import { findCandidateFilePaths } from "./contextBuilder";
+import { AgentContext } from "./types";
 import {
-  getFreeCopilotModelId,
-  loadFreeCopilotConfig,
-  FreeCopilotModel,
+  getFreeCoderModelId,
+  loadFreeCoderConfig,
+  FreeCoderModel,
 } from "../config/modelConfig";
 
 export type AgentPlanStatus = "ready" | "clarification";
@@ -63,13 +61,13 @@ async function getConfiguredAgentModel(
     | "changeGenerator"
     | "embed",
   modelId?: string,
-): Promise<FreeCopilotModel> {
-  const config = await loadFreeCopilotConfig();
+): Promise<FreeCoderModel> {
+  const config = await loadFreeCoderConfig();
 
   const model = modelId
     ? config.models.find(
         (item) =>
-          getFreeCopilotModelId(item) === modelId && item.roles?.includes(role),
+          getFreeCoderModelId(item) === modelId && item.roles?.includes(role),
       )
     : config.models.find((item) => item.roles?.includes(role));
 
@@ -81,7 +79,7 @@ async function getConfiguredAgentModel(
     }
 
     throw new Error(
-      `No model is configured for the "${role}" role in ~/.freecopilot/config.yaml.`,
+      `No model is configured for the "${role}" role in ~/.freecoder/config.yaml.`,
     );
   }
 
@@ -191,7 +189,7 @@ export async function generateAgentPlan(
 
 function buildSystemPrompt(): string {
   return [
-    "You are the planning engine for FreeCopilot,",
+    "You are the planning engine for FreeCoder,",
     "a VS Code AI coding assistant.",
     "",
     "Your job is to understand the user's request,",
@@ -975,7 +973,7 @@ function isPlannedChange(value: unknown): value is PlannedChange {
 
 function buildResolutionSystemPrompt(): string {
   return [
-    "You are the request-resolution engine for FreeCopilot.",
+    "You are the request-resolution engine for FreeCoder.",
     "",
     "Your only job is to understand what the user wants the Agent to work on.",
     "Do not generate code.",

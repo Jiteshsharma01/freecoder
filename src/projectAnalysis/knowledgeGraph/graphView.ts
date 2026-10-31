@@ -6,8 +6,8 @@ export function showKnowledgeGraph(
     graph: KnowledgeGraph
 ): void {
     const panel = vscode.window.createWebviewPanel(
-        'freeCopilotKnowledgeGraph',
-        'Free Copilot: Knowledge Graph',
+        'freeCoderKnowledgeGraph',
+        'Free Coder: Knowledge Graph',
         vscode.ViewColumn.One,
         {
             enableScripts: true,

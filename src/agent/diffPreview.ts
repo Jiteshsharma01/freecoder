@@ -3,14 +3,14 @@ import * as path from "path";
 
 import { FileChange } from "./types";
 
-import { FreeCopilotDiffProvider, createDiffUri } from "./virtualDiffProvider";
+import { FreeCoderDiffProvider, createDiffUri } from "./virtualDiffProvider";
 
 const agentDiffResources = new Set<string>();
 
 export async function showAgentDiffs(
   rootPath: string,
   changes: FileChange[],
-  diffProvider: FreeCopilotDiffProvider,
+  diffProvider: FreeCoderDiffProvider,
 ): Promise<void> {
   if (changes.length === 0) {
     throw new Error("There are no changes to preview.");
@@ -24,7 +24,7 @@ export async function showAgentDiffs(
 async function showSingleDiff(
   rootPath: string,
   change: FileChange,
-  diffProvider: FreeCopilotDiffProvider,
+  diffProvider: FreeCoderDiffProvider,
 ): Promise<void> {
   const absolutePath = resolveSafePath(rootPath, change.path);
 
@@ -82,11 +82,11 @@ async function showSingleDiff(
    * Track every virtual resource belonging
    * to this Agent diff.
    */
-  if (leftUri.scheme === "freecopilot-diff") {
+  if (leftUri.scheme === "freecoder-diff") {
     agentDiffResources.add(leftUri.toString());
   }
 
-  if (rightUri.scheme === "freecopilot-diff") {
+  if (rightUri.scheme === "freecoder-diff") {
     agentDiffResources.add(rightUri.toString());
   }
 
@@ -158,16 +158,16 @@ export function clearAgentDiffResources(): void {
 function buildDiffTitle(change: FileChange): string {
   switch (change.operation) {
     case "create":
-      return `FreeCopilot: Create ${change.path}`;
+      return `FreeCoder: Create ${change.path}`;
 
     case "delete":
-      return `FreeCopilot: Delete ${change.path}`;
+      return `FreeCoder: Delete ${change.path}`;
 
     case "modify":
-      return `FreeCopilot: Modify ${change.path}`;
+      return `FreeCoder: Modify ${change.path}`;
 
     default:
-      return `FreeCopilot: ${change.path}`;
+      return `FreeCoder: ${change.path}`;
   }
 }
 

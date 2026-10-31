@@ -1,6 +1,6 @@
-# 🚀 Free AI Copilot for VS Code
+# 🚀 Free AI Coder for VS Code
 
-A lightweight, private, and customizable AI code assistant sidebar. FreeCopilot connects directly to locally running AI models such as Ollama, giving you direct control over your development environment and project context.
+A lightweight, private, and customizable AI code assistant sidebar. FreeCoder connects directly to locally running AI models such as Ollama, giving you direct control over your development environment and project context.
 
 ## 📚 Contents
 
@@ -33,7 +33,7 @@ A lightweight, private, and customizable AI code assistant sidebar. FreeCopilot 
 
 * **🦙 Local AI Support:** Connects directly to local engines like Ollama running coding models such as `qwen3-coder:30b`.
 * **🗺️ Project Structure Mapping:** Generates a `project_blueprint.md` project overview to give the AI a high-level understanding of the project's structure.
-* **🕸️ Knowledge Graph & Visualization:** Analyzes source-file relationships such as imports and dependencies, generates a local `.freecopilot/knowledge-graph.json`, and provides an interactive visual representation of the project's architecture.
+* **🕸️ Knowledge Graph & Visualization:** Analyzes source-file relationships such as imports and dependencies, generates a local `.freecoder/knowledge-graph.json`, and provides an interactive visual representation of the project's architecture.
 * **🤖 AI Coding Agent:** Communicate directly with the currently active file or relevant project files. The Agent creates a reviewable plan, generates proposed changes, opens a VS Code diff, applies approved changes through `WorkspaceEdit`, validates the project when supported, and provides an Undo action.
 * **🎯 Active File Context:** Uses the file currently open in the VS Code editor when a request requires project-aware understanding.
 * **🔎 Project Reference Analysis:** Searches relevant project files for references when handling project-wide requests.
@@ -49,7 +49,7 @@ A lightweight, private, and customizable AI code assistant sidebar. FreeCopilot 
 
 # 🗺️ Project Map & Knowledge Graph
 
-FreeCopilot maintains project-level structural information that can be used by the project map, knowledge graph, and Agent features.
+FreeCoder maintains project-level structural information that can be used by the project map, knowledge graph, and Agent features.
 
 ## Project Types
 
@@ -101,7 +101,7 @@ src/app/page.tsx
 The graph is stored locally at:
 
 ```text
-.freecopilot/
+.freecoder/
 └── knowledge-graph.json
 ```
 
@@ -177,9 +177,9 @@ At this point:
 
 ## 🧩 Change Generation & Diff Review
 
-After the plan is approved, FreeCopilot asks the model to generate the exact resulting file content or filesystem operation required by the approved plan.
+After the plan is approved, FreeCoder asks the model to generate the exact resulting file content or filesystem operation required by the approved plan.
 
-The generated changes are opened in the VS Code diff editor using a **read-only virtual `freecopilot-diff://` document provider** for proposed content.
+The generated changes are opened in the VS Code diff editor using a **read-only virtual `freecoder-diff://` document provider** for proposed content.
 
 This prevents the proposed side of the diff from becoming an editable `untitled:` document and avoids unwanted:
 
@@ -213,7 +213,7 @@ Filesystem rename support exists in the internal change model but is intentional
 
 ## ✅ Apply Changes
 
-Only after the user selects **Apply All Changes** does FreeCopilot modify the real workspace.
+Only after the user selects **Apply All Changes** does FreeCoder modify the real workspace.
 
 The Agent uses VS Code's `WorkspaceEdit` APIs rather than directly writing generated content to disk during the review stage.
 
@@ -228,13 +228,13 @@ flowchart LR
     E --> F[Validate Project]
 ```
 
-Before applying, FreeCopilot checks that the workspace still matches the snapshots used when the changes were generated. This prevents stale Agent output from silently overwriting newer developer edits.
+Before applying, FreeCoder checks that the workspace still matches the snapshots used when the changes were generated. This prevents stale Agent output from silently overwriting newer developer edits.
 
 ---
 
 ## 🔍 Post-Apply Validation
 
-After the WorkspaceEdit succeeds, FreeCopilot can run project-provided validation commands when they are available.
+After the WorkspaceEdit succeeds, FreeCoder can run project-provided validation commands when they are available.
 
 The validation layer is intentionally technology-agnostic. It does not assume that every project is React or Next.js.
 
@@ -251,7 +251,7 @@ Only scripts that actually exist in the target project's `package.json` are cons
 Validation results are shown separately from the Agent lifecycle:
 
 ```text
-🧠 FreeCopilot Agent
+🧠 FreeCoder Agent
 ✓ Applying changes
 ✓ Validating project
 ✓ Agent task completed
@@ -263,7 +263,7 @@ Validation results are shown separately from the Agent lifecycle:
 or:
 
 ```text
-🧠 FreeCopilot Agent
+🧠 FreeCoder Agent
 ✓ Applying changes
 ✓ Validating project
 ✓ Agent task completed
@@ -311,7 +311,7 @@ delete  → recreate original file
 rename  → reverse filesystem rename
 ```
 
-Undo is deliberately protected against subsequent developer edits. For example, if the Agent modifies `Header.tsx` and the developer edits that file afterwards, FreeCopilot refuses to restore the old snapshot instead of overwriting the developer's newer work.
+Undo is deliberately protected against subsequent developer edits. For example, if the Agent modifies `Header.tsx` and the developer edits that file afterwards, FreeCoder refuses to restore the old snapshot instead of overwriting the developer's newer work.
 
 After successful undo, the action changes to:
 
@@ -329,7 +329,7 @@ Normal AI chat and Agent operations have separate cancellation controllers.
 
 ```mermaid
 flowchart TD
-    A[FreeCopilot] --> B[Normal Chat]
+    A[FreeCoder] --> B[Normal Chat]
     A --> C[Agent]
     B --> D[_activeAbortController]
     C --> E[_agentAbortController]
@@ -337,12 +337,12 @@ flowchart TD
     C --> G[Stop Agent]
 ```
 
-FreeCopilot currently allows only one active Agent task at a time.
+FreeCoder currently allows only one active Agent task at a time.
 
 If an Agent task is already running:
 
 ```text
-A FreeCopilot Agent task is already in progress.
+A FreeCoder Agent task is already in progress.
 Complete or cancel it before starting another Agent task.
 ```
 
@@ -362,7 +362,7 @@ For a filename-only request such as:
 Remove testFile.tsx
 ```
 
-FreeCopilot searches project analysis for matching paths.
+FreeCoder searches project analysis for matching paths.
 
 ### One match
 
@@ -384,7 +384,7 @@ src/app/tests/testFile.tsx
 src/utils/testFile.tsx
 ```
 
-FreeCopilot asks the user to select the intended file with a VS Code QuickPick instead of allowing the model to guess.
+FreeCoder asks the user to select the intended file with a VS Code QuickPick instead of allowing the model to guess.
 
 ### Explicit path
 
@@ -452,7 +452,7 @@ Broad standalone terms such as `structure` or `repository` are not by themselves
    ollama pull qwen3-coder:30b
    ```
 
-3. Keep the Ollama application/background server running while using FreeCopilot.
+3. Keep the Ollama application/background server running while using FreeCoder.
 
 The current Agent planning and file-change generation pipeline uses the local Ollama model.
 
@@ -486,10 +486,10 @@ This produces a `.vsix` package that can be installed locally in VS Code.
 
 # 🚀 How To Use
 
-## Open FreeCopilot
+## Open FreeCoder
 
 1. Open a project in VS Code.
-2. Click the **Speech Bubble / Free Copilot** icon in the VS Code Activity Bar.
+2. Click the **Speech Bubble / Free Coder** icon in the VS Code Activity Bar.
 3. Open the **Chat Assistant** view.
 
 ## Choose an AI Provider
@@ -622,7 +622,7 @@ The generated content is shown in the diff before it can be applied to the actua
 The extension currently follows a structure broadly centered around these areas:
 
 ```text
-freecopilot/
+freecoder/
 ├── src/
 │   ├── extension.ts
 │   ├── chatHtml.ts
@@ -686,7 +686,7 @@ Opens proposed changes in VS Code diff editors and tracks Agent diff resources.
 
 #### `src/agent/virtualDiffProvider.ts`
 
-Provides read-only `freecopilot-diff://` virtual documents for proposed content.
+Provides read-only `freecoder-diff://` virtual documents for proposed content.
 
 #### `src/agent/applyChanges.ts`
 
@@ -716,7 +716,7 @@ The current product separates general chat from the project-aware Agent.
 
 ```mermaid
 flowchart TD
-    A[VS Code] --> B[FreeCopilot Sidebar]
+    A[VS Code] --> B[FreeCoder Sidebar]
     B --> C[Normal Chat]
     B --> D[AI Agent]
 
@@ -735,7 +735,7 @@ flowchart TD
     D7 --> D8[Undo Available]
 
     E[Project Map] -.-> F[project_blueprint.md]
-    G[Knowledge Graph] -.-> H[.freecopilot/knowledge-graph.json]
+    G[Knowledge Graph] -.-> H[.freecoder/knowledge-graph.json]
     D1 -.-> G
 ```
 
@@ -757,7 +757,7 @@ The AI does not directly write generated code into the workspace during the plan
 
 # 🚧 Current Development Direction
 
-FreeCopilot is being developed toward a reliable, project-aware coding agent rather than a simple chat assistant.
+FreeCoder is being developed toward a reliable, project-aware coding agent rather than a simple chat assistant.
 
 The current stable foundation is:
 

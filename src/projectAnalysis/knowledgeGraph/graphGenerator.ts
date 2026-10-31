@@ -20,7 +20,7 @@ export async function generateKnowledgeGraph(
     return await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: "Free Copilot: Building Knowledge Graph",
+        title: "Free Coder: Building Knowledge Graph",
         cancellable: false,
       },
 
