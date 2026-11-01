@@ -755,7 +755,7 @@ Runs available project-provided validation scripts after successful application.
 
 # 📦 How to Install From File (.VSIX)
 
-If this extension is shared privately as a standalone VSIX bundle:
+Download `freecoder-0.0.4.vsix` from the [Releases page](https://github.com/Jiteshsharma01/freecoder/releases).
 
 1. Open VS Code and navigate to the **Extensions** tab (`Ctrl+Shift+X` or `Cmd+Shift+X`).
 2. Click the **three dots (`...`)** button in the top-right corner of the Extensions panel.
