@@ -1164,7 +1164,6 @@ export function getChatHtml(webviewUri: string): string {
                         modelId: selectedModelId
                     });
                 }
-                updateModelSelectorForMode();
             }
             
             function submitCurrentMode() {
